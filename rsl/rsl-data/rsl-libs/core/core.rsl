@@ -1,0 +1,87 @@
+//! 
+//! 
+//! 
+//! 
+//! 
+
+// Enable internal attributes like "lang"
+#![internal_attributes]
+
+
+// TODO generate implementations in the compiler.
+
+#[lang(vec2)]
+pub struct vec2<T> {
+    data: [T; 2]
+}
+
+
+#[lang(vec3)]
+pub struct vec3<T> {
+    data: [T; 3]
+}
+
+
+#[lang(vec4)]
+pub struct vec4<T> {
+    data: [T; 4]
+}
+
+
+
+
+
+
+
+#[lang(mat)]
+pub struct mat<T, const N, const M> {
+    data: [T; N*M]
+}
+
+
+
+pub trait Add<Rhs> {
+    type Output;
+    
+    fn add(&self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Sub<Rhs> {
+    type Output;
+    
+    fn sub(&self, rhs: Rhs) -> Self::Output;
+}
+
+
+pub trait Mul<Rhs> {
+    type Output;
+    
+    fn mul(&self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Div<Rhs> {
+    type Output;
+    
+    fn div(&self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Mod<Rhs> {
+    type Output;
+    
+    fn mod(&self, rhs: Rhs) -> Self::Output;
+}
+
+pub trait Sub<Rhs> {
+    type Output;
+    
+    fn sub(&self, rhs: Rhs) -> Self::Output;
+}
+
+
+
+
+
+
+
+
+

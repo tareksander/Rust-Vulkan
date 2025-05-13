@@ -1,0 +1,10 @@
+[package]
+name = "rsl-data"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+unicode-segmentation.workspace = true
+bitflags.workspace = true
+ariadne.workspace = true
