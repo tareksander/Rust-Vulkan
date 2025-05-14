@@ -1,6 +1,6 @@
 //! This module contains compiler internals which should not be used by end-users, but have to be public to be usable from the other compiler crates
 
-use std::{cell::RefCell, collections::HashMap, fmt::Display, hash::{BuildHasher, Hash, Hasher, RandomState}, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher, RandomState}, path::PathBuf};
 
 use hashbrown::HashTable;
 use tokens::TokenType;
@@ -25,6 +25,12 @@ struct StringTableInner {
 }
 
 pub struct StringTable(RefCell<StringTableInner>);
+
+impl Debug for StringTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("StringTable").field(&self.0.borrow().strings).finish()
+    }
+}
 
 impl StringTable {
     pub fn new() -> Self {
@@ -139,7 +145,7 @@ struct DisplayPathBuf(PathBuf);
 
 impl Display for DisplayPathBuf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.display().fmt(f)
+        Display::fmt(&self.0.display(), f)
     }
 }
 
