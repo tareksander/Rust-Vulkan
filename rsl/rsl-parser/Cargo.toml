@@ -1,5 +1,5 @@
 [package]
-name = "rsl-test"
+name = "rsl-parser"
 version = "0.1.0"
 edition = "2024"
 

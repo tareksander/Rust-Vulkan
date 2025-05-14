@@ -1,5 +1,5 @@
 [workspace]
-members = [ "examples/gravity", "rsl/rsl-data", "rsl/rsl-rust", "rsl/rsl-spirv", "rsl/rsl-test", "rsl/rsl-wgsl", "rsl/rslc", "slang-build", "vk-2d","vk-ecs"]
+members = [ "examples/gravity", "rsl/rsl-borrow-checker", "rsl/rsl-data-next", "rsl/rsl-lexer", "rsl/rsl-parser", "rsl/rsl-type-checker", "slang-build", "vk-2d","vk-ecs"]
 resolver = "3"
 
 
@@ -8,7 +8,7 @@ resolver = "3"
 
 unicode-segmentation = "1.12.0"
 regex = "1.10.3"
-ariadne = "0.4.1"
+ariadne = { version = "0.5.1", features = ["auto-color"] }
 
 chrono = { version = "0.4.34" }
 rand = "0.9.0"
