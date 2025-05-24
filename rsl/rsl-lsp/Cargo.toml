@@ -1,12 +1,10 @@
 [package]
-name = "rsl-parser"
+name = "rsl-lsp"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 rsl-data = { path = "../rsl-data-next" }
-ariadne.workspace = true
-
-[dev-dependencies]
-rsl-lexer = { path = "../rsl-lexer" }
+serde_json.workspace = true
+serde.workspace = true
 

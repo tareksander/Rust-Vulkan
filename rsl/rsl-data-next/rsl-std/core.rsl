@@ -1,0 +1,84 @@
+// Enable internal attributes for this file
+#![core]
+
+
+
+pub trait Add<Rhs, #U> {
+    type Output;
+    
+    fn #U add(#U self, rhs: #U Rhs) -> #U Output;
+}
+
+
+pub trait Sub<Rhs> {
+    type Output;
+    
+    fn sub(&self, rhs: Rhs) -> Output;
+}
+
+
+pub trait Mul<Rhs> {
+    type Output;
+    
+    fn mul(&self, rhs: Rhs) -> Output;
+}
+
+
+pub trait Div<Rhs> {
+    type Output;
+    
+    fn div(&self, rhs: Rhs) -> Output;
+}
+
+
+pub trait Mod<Rhs> {
+    type Output;
+    
+    fn mod(&self, rhs: Rhs) -> Output;
+}
+
+
+pub trait Neg<Rhs> {
+    type Output;
+    
+    fn neg(&self, rhs: Rhs) -> Output;
+}
+
+
+
+/// Marker trait for images and samplers
+pub trait Opaque {}
+
+/// Marker trait for everything but images and samplers
+pub trait Transparent {}
+
+
+pub struct vec<T, const N> {}
+
+
+
+
+pub struct mat<T, const Rows, const Cols> {}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

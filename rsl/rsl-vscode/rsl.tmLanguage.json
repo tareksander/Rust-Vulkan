@@ -1,0 +1,13 @@
+{
+    "scopeName": "source.rsl",
+    "patterns": [{ "include": "#keyword" }],
+    "repository": {
+        "keyword": {
+            "patterns": [ { "include": "fn" } ]
+        },
+        "fn": {
+            "matches": "fn\\W"
+        }
+    }
+}
+  

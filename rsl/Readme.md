@@ -207,7 +207,7 @@ A correctly installed [Vulkan SDK][vksdk] is needed, with all programs accessibl
 
 
 
-[^1]: Features that are both in Android Baseline Profile 2022 and in Vulkan Desktop Baseline Profile 2022 are required.
+[^1]: Features that are both in Android Baseline Profile 2022 and in Vulkan Desktop Baseline Profile 2022 will always be required. During initial development of the language, the main target will be Desktop Baseline Profile 2024 and Android 15. The requirements may be raised to that if no use case for lower versions arises.
 
 
 [slang]: https://shader-slang.org/

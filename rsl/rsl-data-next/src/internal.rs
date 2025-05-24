@@ -1,9 +1,11 @@
 //! This module contains compiler internals which should not be used by end-users, but have to be public to be usable from the other compiler crates
 
-use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher, RandomState}, path::PathBuf};
+use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher, RandomState}, ops::{Add, Range}, path::PathBuf};
 
+use ast::ModuleData;
 use hashbrown::HashTable;
-use tokens::TokenType;
+use ir::SymbolTable;
+use tokens::Token;
 
 use crate::input::CompilerInput;
 
@@ -13,6 +15,8 @@ pub mod tokens;
 pub mod ast;
 
 pub mod ir;
+
+
 
 
 
@@ -63,23 +67,55 @@ impl StringTable {
             return InternedString(i);
         }
     }
+    
+    pub fn memory(&self) -> usize {
+        let d = self.0.borrow();
+        return size_of::<usize>() * (d.strings.capacity() + d.map.capacity()) + d.strings.iter().map(|s| s.capacity()).sum::<usize>();
+    }
 }
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InternedString(usize);
 
 
+impl InternedString {
+    pub fn get(&self, strings: &StringTable) -> String {
+        strings.lookup(*self)
+    }
+}
 
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StorageClass {
+    Input,
+    Output,
+    Function,
+    Private,
+    Push,
+    Storage,
+    PhysicalStorage,
+    Workgroup,
+    Uniform,
+    UniformConstant,
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    Pub,
+    Priv,
+    Pack,
+}
 
 pub struct Sources {
     pub source_files: Vec<PathBuf>,
     pub source_strings: Vec<String>
 }
 
-pub struct LexerData {
-    pub tokens: Vec<TokenType>,
-    pub spans: Vec<SourceSpan>,
+pub struct LexedFile {
+    pub tokens: Vec<Token>,
+    pub token_spans: Vec<Range<usize>>,
 }
 
 
@@ -92,12 +128,41 @@ pub struct CompilerData {
     // lexer & parser interleaved data, since submodules lead to further tokenized files.
     pub sources: RefCell<Sources>,
     
+    /// Lexer generated data
+    pub lexed: RefCell<Vec<LexedFile>>,
+    
+    /// Parsed modules
+    pub parsed_modules: RefCell<HashMap<InternedString, ModuleData>>,
+    
+    
+    pub symbol_tables: RefCell<Vec<SymbolTable>>,
     
     
     
     
 }
 
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Uniformity {
+    Uni,
+    Suni,
+    Nuni,
+    Generic(InternedString)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mutability {
+    Immutable,
+    Mutable
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Safety {
+    Safe,
+    Unsafe
+}
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,11 +237,60 @@ impl ariadne::Cache<usize> for ReportSourceCache {
 
 
 
+#[derive(Debug, Clone)]
+pub enum Builtin {
+    GlobalInvocationId,
+}
+
+
+#[derive(Debug, Clone)]
+pub enum Layout {
+    Auto,
+    Std140,
+    Std430,
+    Scalar,
+    None,
+}
+
+#[derive(Debug, Clone)]
+pub enum Attribute {
+    Layout(Layout),
+    Builtin(Builtin),
+    Push(),
+    Spec(),
+    Compute(),
+    Unsafe(UnsafeAttribute),
+    Lang(LangAttribute),
+}
 
 
 
+#[derive(Debug, Clone)]
+pub enum UnsafeAttribute {
+    
+}
 
 
+
+#[derive(Debug, Clone)]
+pub enum LangAttribute {
+    /// Module attribute, enables all other lang attributes.
+    Core,
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+}
 
 
 

@@ -1,4 +1,4 @@
-use std::{hash::Hash};
+use std::{hash::Hash, mem::discriminant};
 
 use super::{InternedString};
 
@@ -41,6 +41,7 @@ pub enum Keyword {
     Trait,
     Unsafe,
     Where,
+    Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
@@ -62,7 +63,6 @@ pub enum Special {
     Caret,
     Exclamation,
     Tilde,
-    Hash,
     Dot,
     DoubleDot,
     Comma,
@@ -80,7 +80,7 @@ pub enum Special {
 
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenType {
+pub enum Token {
     Keyword(Keyword),
     Ident(InternedString),
     Lifetime(InternedString),
@@ -88,11 +88,32 @@ pub enum TokenType {
     Special(Special),
     Int(u128),
     Float(f64),
-    String(String),
+    String(InternedString),
     Char(char),
     DocComment(String),
     End,
     Start,
+}
+
+impl Eq for Token {}
+
+impl Hash for Token {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Token::Keyword(keyword) => keyword.hash(state),
+            Token::Ident(interned_string) => interned_string.hash(state),
+            Token::Lifetime(interned_string) => interned_string.hash(state),
+            Token::Uniformity(interned_string) => interned_string.hash(state),
+            Token::Special(special) => special.hash(state),
+            Token::Int(i) => i.hash(state),
+            Token::Float(_) => panic!("Float tokens shouldn't be put in HashMaps!"),
+            Token::String(s) => s.hash(state),
+            Token::Char(c) => c.hash(state),
+            Token::End => discriminant(self).hash(state),
+            Token::Start => discriminant(self).hash(state),
+            Token::DocComment(s) => s.hash(state),
+        }
+    }
 }
 
 

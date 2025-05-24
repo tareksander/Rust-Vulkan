@@ -1,16 +1,16 @@
-use std::{cell::{Cell, RefCell}, collections::HashMap};
+use std::{cell::{Cell, RefCell}, collections::HashMap, ops::Range};
 
 use ariadne::{Color, Label, Report};
 use unicode_segmentation::UnicodeSegmentation;
 
-use rsl_data::internal::{tokens::{Keyword, Special, TokenType}, SourceSpan, StringTable};
+use rsl_data::internal::{tokens::{Keyword, Special, Token}, SourceSpan, StringTable};
 
 
 
 
 
 
-pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result<(Vec<TokenType>, Vec<SourceSpan>), Report<'a, SourceSpan>> {
+pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result<(Vec<Token>, Vec<Range<usize>>), Report<'a, SourceSpan>> {
     let i = Cell::new(0);
     let ascii_char_at = |i: usize| {
         let c = code.as_bytes().get(i);
@@ -50,9 +50,9 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         return Ok(())
     };
     
-    let tokens: RefCell<Vec<TokenType>> = Vec::with_capacity(code.len()/4).into();
+    let tokens: RefCell<Vec<Token>> = Vec::with_capacity(code.len()/4).into();
     let spans: RefCell<Vec<SourceSpan>> = Vec::with_capacity(code.len()/4).into();
-    tokens.borrow_mut().push(TokenType::Start);
+    tokens.borrow_mut().push(Token::Start);
     spans.borrow_mut().push(SourceSpan { file, start: 0, end: 0 });
     
     
@@ -91,6 +91,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         keywords.insert("trait", Trait);
         keywords.insert("unsafe", Unsafe);
         keywords.insert("where", Where);
+        keywords.insert("type", Type);
     }
     
     let mut special = HashMap::new();
@@ -112,7 +113,6 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         special.insert('^', Caret);
         special.insert('!', Exclamation);
         special.insert('~', Tilde);
-        special.insert('#', Hash);
         special.insert('.', Dot);
         special.insert(',', Comma);
         special.insert('<', AngleBracketOpen);
@@ -195,9 +195,9 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         };
         spans.borrow_mut().push(span);
         if let Some(kw) = keywords.get(s) {
-            tokens.borrow_mut().push(TokenType::Keyword(*kw));
+            tokens.borrow_mut().push(Token::Keyword(*kw));
         } else {
-            tokens.borrow_mut().push(TokenType::Ident(strings.insert_get(s)));
+            tokens.borrow_mut().push(Token::Ident(strings.insert_get(s)));
         }
         return Ok(());
     };
@@ -205,10 +205,10 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
     let check_generic_uniformity = || {
         let start = i.get();
         if let Some(c) = ascii_char_at(i.get())? {
-            if c == '~' {
+            if c == '#' {
                 let s = must_ident()?;
                 spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
-                tokens.borrow_mut().push(TokenType::Uniformity(strings.insert_get(s)));
+                tokens.borrow_mut().push(Token::Uniformity(strings.insert_get(s)));
             }
         }
         return Ok(());
@@ -217,7 +217,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
     let check_comment = || {
         if let Some(c) = ascii_char_at(i.get())? {
             if c == '/' {
-                if let Some(c) = ascii_char_at(i.get())? {
+                if let Some(c) = ascii_char_at(i.get()+1)? {
                     if c == '/' {
                         i.set(i.get()+2);
                         for g in code[i.get()..].graphemes(true) {
@@ -233,17 +233,59 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         return Ok(());
     };
     
+    let check_doc_comment = || {
+        if let Some(c) = ascii_char_at(i.get())? {
+            if c == '/' {
+                if let Some(c) = ascii_char_at(i.get())? {
+                    if c == '/' {
+                        if let Some(c) = ascii_char_at(i.get())? {
+                            if c == '/' {
+                                i.set(i.get()+3);
+                                let start = i.get();
+                                for g in code[i.get()..].graphemes(true) {
+                                    let end = i.get();
+                                    i.set(i.get()+g.len());
+                                    if g.contains('\n') {
+                                        spans.borrow_mut().push(SourceSpan { file, start, end });
+                                        tokens.borrow_mut().push(Token::DocComment(code[start..end].to_string()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Ok(());
+    };
+    
     
     let check_special = || {
         let start = i.get();
         'b: {
             if let Some(c) = ascii_char_at(i.get())? {
+                if c == '=' || c == '-' {
+                    if let Some(c2) = ascii_char_at(i.get()+1)? {
+                        if c2 == '>' {
+                            i.set(i.get()+2);
+                            spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
+                            if c == '=' {
+                                tokens.borrow_mut().push(Token::Special(Special::ThickArrow));
+                            }
+                            if c == '-' {
+                                tokens.borrow_mut().push(Token::Special(Special::ThinArrow));
+                            }
+                            break 'b;
+                        }
+                    }
+                }
                 if special_double.contains_key(&c) {
-                    if let Some(c2) = ascii_char_at(i.get())? {
+                    if let Some(c2) = ascii_char_at(i.get()+1)? {
                         if c2 == c {
                             i.set(i.get()+2);
                             spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
-                            tokens.borrow_mut().push(TokenType::Special(special_double[&c]));
+                            tokens.borrow_mut().push(Token::Special(special_double[&c]));
                             break 'b;
                         }
                     }
@@ -251,7 +293,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                 if special.contains_key(&c) {
                     i.set(i.get()+1);
                     spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
-                    tokens.borrow_mut().push(TokenType::Special(special[&c]));
+                    tokens.borrow_mut().push(Token::Special(special[&c]));
                 }
             }
         }
@@ -268,6 +310,8 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                 } else {
                     break;
                 }
+            } else {
+                break;
             }
         }
         let fs = &code[fraction_start..i.get()];
@@ -283,7 +327,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
             }
         }
         spans.borrow_mut().push(span);
-        tokens.borrow_mut().push(TokenType::Float(number));
+        tokens.borrow_mut().push(Token::Float(number));
         return Ok(());
     };
     
@@ -334,10 +378,17 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                             }
                         }
                     } else {
-                        if c == '.' && ty == LiteralType::Dec && i.get() >= start+1 {
+                        if c == '.' {
+                            if ty != LiteralType::Dec {
+                                let span = SourceSpan { file, start, end: i.get() };
+                                return Err(Report::build(ariadne::ReportKind::Error, span)
+                                    .with_message(format!("Float literals are only supported in decimal notation"))
+                                    .with_label(Label::new(span).with_message("Non-decimal float literal").with_color(Color::Red)).finish());
+                            }
                             match u128::from_str_radix(&code[number_start..(i.get()-1)], 10) {
                                 Ok(whole) => {
                                     check_float(whole as f64, start)?;
+                                    return Ok(());
                                 },
                                 Err(_) => {
                                     let span = SourceSpan { file, start, end: i.get()-1 };
@@ -367,7 +418,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         match u128::from_str_radix(&code[number_start..i.get()], radix) {
             Ok(number) => {
                 spans.borrow_mut().push(span);
-                tokens.borrow_mut().push(TokenType::Int(number));
+                tokens.borrow_mut().push(Token::Int(number));
             },
             Err(_) => {
                 let span = SourceSpan { file, start, end: i.get()-1 };
@@ -390,15 +441,12 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         check_comment()?;
         check_special()?;
         check_int_float()?;
-        
-        
-        
-        // TODO check doc comment
+        check_doc_comment()?;
         
         let span = SourceSpan { file, start: i.get(), end: i.get() };
         if i.get() >= code.len() {
             spans.borrow_mut().push(span);
-            tokens.borrow_mut().push(TokenType::End);
+            tokens.borrow_mut().push(Token::End);
             break;
         }
         // if nothing matched, we have an unknown character
@@ -413,7 +461,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
             return Err(r.finish());
         }
     }
-    return Ok((tokens.take(), spans.take()));
+    return Ok((tokens.take(), spans.take().iter().map(|s| s.start..s.end).collect()));
 }
 
 
@@ -428,7 +476,7 @@ mod test {
     #[test]
     fn test_tokenize() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = "pub fn foo() 0x1.2";
+        let code = "pub fn foo() 1. /";
         let cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
             source_strings: vec![code.to_string()]
