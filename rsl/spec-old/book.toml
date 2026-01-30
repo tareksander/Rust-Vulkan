@@ -1,0 +1,6 @@
+[book]
+authors = ["tareksander"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Warpfield Book"

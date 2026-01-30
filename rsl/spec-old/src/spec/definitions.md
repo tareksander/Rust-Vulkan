@@ -1,6 +1,6 @@
 # Supporting Definitions
 
-These definitions are largely adapted from teh SPIR-V specification, which serves as the main target of the language.
+These definitions are largely adapted from the SPIR-V specification, which serves as the main target of the language.
 
 
 
@@ -22,6 +22,13 @@ Entrypoints come in varieties like compute, vertex and fragment.
 ### Invocation
 
 An invocation is an instance of an entrypoint execution. The host launches sets of invocations at once to run tasks. Invocations are bundled into typically small sets of invocations that can operate on small pieces of data efficiently, which are called subgroups. The next higher level is a workgroup, for which the size can be set for compute entrypoints, but not for others. After that comes the scope encompassing all of a single "command" from the host, like a compute dispatch.
+
+
+
+
+
+
+
 
 
 

@@ -13,7 +13,6 @@
     - [Supporting Definitions](./spec/definitions.md)
     - [Tokens](./spec/tokens.md)
     - [Syntax](./spec/syntax.md)
-    - [Type Paths](./spec/type_paths.md)
     - [Uniformity](./spec/uniformity.md)
     - [Functions](./spec/functions.md)
     - [Modules](./spec/modules.md)
@@ -24,7 +23,7 @@
     - [Backends](./spec/targets.md)
         - [SPIR-V](./spec/targets/spirv.md)
         - [WGSL](./spec/targets/wgsl.md)
-        - [Rust](./spec/targets/rust.md)
+        - [C](./spec/targets/c.md)
         - [WebAssembly](./spec/targets/wasm.md)
     
         

@@ -24,15 +24,9 @@ Identifiers are denoted with Ident in the syntax section.
 Keywords are denoted by name in the syntax section.
 
 
-
-
 ## Literals
 
-
-
-
-
-
+Integer and float literals are supported, with integers supporting decimal, binary and hexadecimal notation. There are no string or character types or literals.
 
 
 

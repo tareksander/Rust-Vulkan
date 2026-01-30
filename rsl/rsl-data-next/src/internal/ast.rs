@@ -1,9 +1,11 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
+use crate::internal::ShaderType;
+
 use super::{Attribute, InternedString, Mutability, StorageClass, Uniformity, Visibility};
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TokenRange {
     pub file: usize,
     pub range: Range<usize>
@@ -40,7 +42,6 @@ pub enum GenericArg {
     Type(Type),
     Expression(Expression),
     Uniformity(Uniformity, TokenRange),
-    GenericUniformity(InternedString, TokenRange),
     Lifetime(InternedString, TokenRange),
 }
 
@@ -48,7 +49,6 @@ pub enum GenericArg {
 pub enum GenericArgDefinition {
     Type(InternedString, TokenRange),
     Expression(InternedString, TokenRange),
-    Uniformity(InternedString, TokenRange),
     Lifetime(InternedString, TokenRange),
 }
 
@@ -60,11 +60,10 @@ pub enum Type {
         star_token: TokenRange,
         uni: Option<(Uniformity, TokenRange)>,
         mutability: Mutability,
-        class: Option<(StorageClass, TokenRange)>,
         ty: Box<Type>
     },
     Reference{
-        star_token: TokenRange,
+        ampersand_token: TokenRange,
         uni: Option<(Uniformity, TokenRange)>,
         mutability: Option<(Mutability, TokenRange)>,
         ty: Box<Type>
@@ -73,6 +72,11 @@ pub enum Type {
         ty: Box<Type>,
         uni: Option<(Uniformity, TokenRange)>,
         size: Expression,
+    },
+    Unit,
+    Inferred {
+        uni: Option<(Uniformity, TokenRange)>,
+        ty: Option<Box<Type>>,
     }
 }
 
@@ -201,8 +205,6 @@ pub enum BinOp {
     LogAnd,
     BinOr,
     LogOr,
-    // TODO non-short-circuiting and/or? Should lead to better GPU performance due to less branches
-    // Solution: Just support binary and/or for bools
     BinXor,
     Index,
     Assign,
@@ -280,6 +282,7 @@ pub struct FunctionDefinition {
     pub attrs: Vec<Attribute>,
     pub visibility: Option<(Visibility, TokenRange)>,
     pub unsafe_token: Option<TokenRange>,
+    pub shader_type: Option<(ShaderType, TokenRange)>,
     pub uniformity: Option<(Uniformity, TokenRange)>,
     pub fn_token: TokenRange,
     pub ident: InternedString,
@@ -288,6 +291,7 @@ pub struct FunctionDefinition {
     pub generics_constraints: Vec<GenericsConstraint>,
     pub params: Vec<(InternedString, TokenRange, Type)>,
     pub block: Block,
+    pub ret: Type,
 }
 
 #[derive(Debug)]

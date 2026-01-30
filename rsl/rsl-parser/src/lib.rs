@@ -1,18 +1,21 @@
-use std::{collections::HashMap, sync::LazyLock};
+use std::{collections::HashMap, f32::consts::E, sync::LazyLock};
 
 use ariadne::{Color, Label, Report, ReportBuilder, ReportKind};
-use rsl_data::internal::{ast::{BinOp, Expression, FunctionDefinition, GenericArg, ItemPath, ItemPathSegment, ModuleData, TokenRange, Type, UnOp}, tokens::{Keyword, Special, Token}, Attribute, CompilerData, InternedString, Mutability, SourceSpan, StorageClass, Uniformity, Visibility};
+use rsl_data::internal::{Attribute, CompilerData, InternedString, Mutability, ShaderType, SourceSpan, StorageClass, StringTable, Uniformity, Visibility, ast::{BinOp, Block, Expression, FunctionDefinition, GenericArg, ItemPath, ItemPathSegment, ModuleData, Statement, TokenRange, Type, UnOp}, tokens::{Keyword, Special, Token}};
 
 
 
-type ParserResult<T> = Result<T, Report<'static, SourceSpan>>;
+type ParserResult<T> = Result<T, ()>;
 
 struct ParserData<'a> {
     file: usize,
     tokens: &'a[Token],
     spans: &'a[SourceSpan],
     index: usize,
+    strings: &'a StringTable,
+    errors: Vec<Report<'static, SourceSpan>>,
 }
+
 
 
 impl<'a> ParserData<'a> {
@@ -65,37 +68,58 @@ impl<'a> ParserData<'a> {
         self.index += 1;
         match t {
             Token::Ident(s) => Ok((*s, TokenRange::point(self.file, i))),
-            _ => Err(Report::build(ReportKind::Error, span)
+            _ => {
+                self.errors.push(Report::build(ReportKind::Error, span)
             .with_message("Expected identifier.")
             .with_label(Label::new(span).with_message("Here"))
-            .finish())
+            .finish());
+                return Err(());
+            }
         }
     }
     
+    fn skip_to(&mut self, t: &Token) {
+        loop {
+            let ct = &self.tokens[self.index];
+            if ct == &Token::End || ct == t {
+                return;
+            }
+            self.index += 1;
+        }
+    }
+    
+    fn skip_after(&mut self, t: &Token) {
+        self.skip_to(t);
+        if &self.tokens[self.index] != &Token::End {
+            self.index += 1;
+        }
+    }
     
 }
 
 
 
-pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Vec<Attribute>) -> ParserResult<ModuleData> {
+pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Vec<Attribute>, strings: &StringTable) -> ModuleData {
     let mut data = ParserData {
         file,
         tokens,
         spans,
         index: 0,
+        strings,
+        errors: vec![],
     };
     parse_module_file(&mut data, attrs)
 }
 
-fn parse_module_file(data: &mut ParserData, mut attrs: Vec<Attribute>) -> ParserResult<ModuleData> {
+fn parse_module_file(data: &mut ParserData, mut attrs: Vec<Attribute>) -> ModuleData {
     assert!(*data.take() == Token::Start);
-    let m = parse_module(data, &mut attrs, true)?;
+    let m = parse_module(data, &mut attrs, true);
     assert!(*data.take() == Token::End);
-    return Ok(m);
+    return m;
 }
 
 
-fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: bool) -> ParserResult<ModuleData> {
+fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: bool) -> ModuleData {
     let mut visibility = None;
     let mut m = ModuleData {
         attrs: attrs.clone(),
@@ -136,7 +160,12 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                         todo!()
                     },
                     Keyword::Fn => {
-                        m.functions.push(parse_function(data, visibility, None, None, &attrs)?);
+                        match parse_function(data, visibility, None, None, None, &attrs) {
+                            Ok(f) => {
+                                m.functions.push(f);
+                            },
+                            Err(_) => {}
+                        }
                         visibility = None;
                     },
                     _=> {
@@ -148,14 +177,14 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                 if toplevel {
                     break;
                 } else {
-                    return Ok(m);
+                    return m;
                 }
             },
             Token::End => {
                 if ! toplevel {
                     break;
                 } else {
-                    return Ok(m);
+                    return m;
                 }
             },
             _ => {
@@ -163,12 +192,13 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
             }
         }
     }
-    return Err(Report::build(ReportKind::Error, data.spans[data.index-1])
+    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
         .with_message("Expected module item, found invalid token")
-        .with_label(Label::new(data.spans[data.index-1])
+        .with_label(Label::new(data.spans[data.index])
             .with_message("This token")
             .with_color(Color::Red))
         .finish());
+    return m;
 }
 
 
@@ -183,14 +213,14 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
 
 
 
-fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, unsafe_token: Option<TokenRange>, uni: Option<(Uniformity, TokenRange)>, attrs: &Vec<Attribute>) -> ParserResult<FunctionDefinition> {
+fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, unsafe_token: Option<TokenRange>, shader_type: Option<(ShaderType, TokenRange)>, uni: Option<(Uniformity, TokenRange)>, attrs: &Vec<Attribute>) -> ParserResult<FunctionDefinition> {
     let fn_token = TokenRange::point(data.file, data.index);
     assert!(*data.take() == Token::Keyword(Keyword::Fn));
     let generics = vec![];
     let generics_constraints = vec![];
     let block;
     let params;
-    let mut ret = None;
+    let mut ret = Type::Unit;
     let ident = data.take_ident()?;
     if *data.peek() == Token::Special(Special::AngleBracketOpen) {
         data.take();
@@ -199,29 +229,33 @@ fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, 
     if *data.take() == Token::Special(Special::RoundBracketOpen) {
         params = parse_delimited(data, parse_ident_type, Token::Special(Special::Comma), Token::Special(Special::RoundBracketClose))?;
         if *data.take() != Token::Special(Special::RoundBracketClose) {
-            return Err(Report::build(ReportKind::Error, data.spans[data.index-1])
+            data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
             .with_message("Expected ')', found invalid token")
             .with_label(Label::new(data.spans[data.index-1])
                 .with_message("This token")
                 .with_color(Color::Red))
             .finish());
+            return Err(());
         }
     } else {
-        return Err(Report::build(ReportKind::Error, data.spans[data.index-1])
+        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
             .with_message("Expected '(', found invalid token")
             .with_label(Label::new(data.spans[data.index-1])
                 .with_message("This token")
                 .with_color(Color::Red))
             .finish());
+        return Err(());
     }
     if *data.peek() == Token::Special(Special::ThinArrow) {
         data.take();
-        ret = Some(parse_type(data, None)?);
+        ret = parse_type(data, None)?;
     }
+    block = parse_block(data)?;
     return Ok(FunctionDefinition {
         attrs: attrs.clone(),
         visibility: vis,
         unsafe_token,
+        shader_type,
         uniformity: uni,
         fn_token,
         ident: ident.0,
@@ -230,49 +264,24 @@ fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, 
         generics_constraints,
         params,
         block,
+        ret,
     })
 }
 
 fn parse_ident_type(data: &mut ParserData) -> ParserResult<(InternedString, TokenRange, Type)> {
     let t = data.take_ident()?;
-    if *data.take() != Token::Special(Special::Comma) {
-        return Err(Report::build(ReportKind::Error, data.spans[data.index-1])
+    if *data.take() != Token::Special(Special::Colon) {
+        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
         .with_message("Expected colon, found invalid token")
         .with_label(Label::new(data.spans[data.index-1])
             .with_message("This token")
             .with_color(Color::Red))
         .finish());
+        return Err(());
     }
     return Ok((t.0, t.1, parse_type(data, None)?));
 }
 
-
-fn parse_storage_class(data: &mut ParserData) -> Option<(StorageClass, TokenRange)> {
-    let t = TokenRange::point(data.file, data.index);
-    match *data.peek() {
-        Token::Keyword(Keyword::PhysicalStorage) => {
-            data.take();
-            Some((StorageClass::PhysicalStorage, t))
-        },
-        Token::Keyword(Keyword::Uniform) => {
-            data.take();
-            Some((StorageClass::Uniform, t))
-        },
-        Token::Keyword(Keyword::Storage) => {
-            data.take();
-            Some((StorageClass::Storage, t))
-        },
-        Token::Keyword(Keyword::Function) => {
-            data.take();
-            Some((StorageClass::Function, t))
-        },
-        Token::Keyword(Keyword::Private) => {
-            data.take();
-            Some((StorageClass::Private, t))
-        },
-        _ => None
-    }
-}
 
 
 fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> ParserResult<Type> {
@@ -285,8 +294,7 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
                 data.take();
                 mutability = Mutability::Immutable;
             }
-            let storage = parse_storage_class(data);
-            return Ok(Type::Pointer { star_token: start, uni, mutability, class: storage, ty: Box::new(parse_type(data, None)?) });
+            return Ok(Type::Pointer { star_token: start, uni, mutability, ty: Box::new(parse_type(data, None)?) });
         },
         Token::Special(Special::And) => {
             let start = TokenRange::point(data.file, data.index);
@@ -295,37 +303,43 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
             
             
         },
-        Token::Ident(_) => {
-            return Ok(Type::Path(parse_item_path(data, false)?, uni));
-        },
-        Token::Keyword(kw) => {
-            match kw {
-                Keyword::Uni => {
+        Token::Ident(s) => {
+            let s = s.get(data.strings);
+            match s.as_str() {
+                "dispatch" => {
                     let t = TokenRange::point(data.file, data.index);
                     data.take();
-                    return parse_type(data, Some((Uniformity::Uni, t)));
+                    return parse_type(data, Some((Uniformity::Dispatch, t)));
                 },
-                Keyword::SUni => {
+                "workgroup" => {
                     let t = TokenRange::point(data.file, data.index);
                     data.take();
-                    return parse_type(data, Some((Uniformity::Suni, t)));
+                    return parse_type(data, Some((Uniformity::Workgroup, t)));
                 },
-                Keyword::Nuni => {
+                "subgroup" => {
                     let t = TokenRange::point(data.file, data.index);
                     data.take();
-                    return parse_type(data, Some((Uniformity::Nuni, t)));
+                    return parse_type(data, Some((Uniformity::Subgroup, t)));
                 },
-                _ => {}
+                "invocation" => {
+                    let t = TokenRange::point(data.file, data.index);
+                    data.take();
+                    return parse_type(data, Some((Uniformity::Invocation, t)));
+                },
+                _ => {
+                    return Ok(Type::Path(parse_item_path(data, false)?, uni));
+                }
             }
-        }
+        },
         _ => {}
     }
-    return Err(Report::build(ReportKind::Error, data.spans[data.index])
+    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
         .with_message("Expected type, found invalid token")
         .with_label(Label::new(data.spans[data.index])
             .with_message("This token")
             .with_color(Color::Red))
         .finish());
+    return Err(());
 }
 
 
@@ -343,12 +357,13 @@ fn parse_generic_arg(data: &mut ParserData) -> ParserResult<GenericArg> {
         
         _ => {}
     }
-    return Err(Report::build(ReportKind::Error, data.spans[data.index])
+    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
         .with_message("Expected generic argument, found invalid token")
         .with_label(Label::new(data.spans[data.index])
             .with_message("This token")
             .with_color(Color::Red))
         .finish());
+    return Err(());
 }
 
 
@@ -393,6 +408,81 @@ fn parse_item_path(data: &mut ParserData, in_expr: bool) -> ParserResult<ItemPat
 
 
 
+fn parse_block(data: &mut ParserData) -> ParserResult<Block> {
+    let t = data.take();
+    if *t != Token::Special(Special::CurlyBracketOpen) {
+        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
+            .with_message("Expected { token, found invalid token")
+            .with_label(Label::new(data.spans[data.index-1])
+                .with_message("This token")
+                .with_color(Color::Red))
+            .finish());
+        return Err(());
+    }
+    let mut statements = vec![];
+    let mut value = None;
+    while *data.peek() != Token::Special(Special::CurlyBracketClose) && *data.peek() != Token::End {
+        if value.is_none() {
+            match data.peek() {
+                // Only statements start with a keyword, but some keywords can be both statements and expressions (e.g. if)
+                Token::Keyword(keyword) => {
+                    todo!()
+                },
+                _ => {
+                    value = Some(parse_expr(data)?);
+                }
+            }
+        }
+        if let Some(v) = value {
+            let is_block = match &v {
+                // TODO include expressions with blocks like if that can stand as a statement without requiring a semicolon
+                Expression::If { condition: _, then: _, other: _ } => true,
+                
+                _ => false
+            };
+            if *data.peek() == Token::Special(Special::Semicolon) {
+                data.take();
+                statements.push(Statement::Expression(v));
+                value = None;
+            } else {
+                if *data.peek() != Token::Special(Special::CurlyBracketClose) && ! is_block {
+                    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
+                        .with_message("Expected end of block after trailing expression")
+                        .with_label(Label::new(data.spans[data.index-1])
+                            .with_message("Here")
+                            .with_color(Color::Red))
+                        .finish());
+                    data.skip_after(&Token::Special(Special::CurlyBracketClose));
+                    return Err(());
+                } else {
+                    if is_block {
+                        statements.push(Statement::Expression(v));
+                        value = None;
+                    } else {
+                        value = Some(v);
+                    }
+                }
+            }
+        }
+    }
+    if *data.peek() == Token::End {
+        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+            .with_message("Expected } token, found end of file")
+            .with_label(Label::new(data.spans[data.index])
+                .with_message("Here")
+                .with_color(Color::Red))
+            .finish());
+        return Err(());
+    }
+    data.take();
+    return Ok(Block {
+        statements,
+        value,
+        label: None,
+    });
+}
+
+
 
 fn parse_delimited<P, T>(data: &mut ParserData, parser: P, delimiter: Token, end: Token) -> ParserResult<Vec<T>> where P: Fn(&mut ParserData) -> ParserResult<T> {
     let mut v = vec![];
@@ -411,12 +501,13 @@ fn parse_delimited<P, T>(data: &mut ParserData, parser: P, delimiter: Token, end
                 data.take();
             },
             _ => {
-                return Err(Report::build(ReportKind::Error, data.spans[data.index])
+                data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
                     .with_message("Expected delimiter or list end token, found invalid token")
                     .with_label(Label::new(data.spans[data.index])
                         .with_message("This token")
                         .with_color(Color::Red))
                     .finish());
+                return Err(());
             }
         }
     }
@@ -496,12 +587,13 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                     match s {
                         Special::DoubleColon => Expression::Item(parse_item_path(data, true)?),
                         _ => {
-                            return Err(Report::build(ReportKind::Error, data.spans[data.index])
+                            data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
                             .with_message("Expected operand, found invalid token")
                             .with_label(Label::new(data.spans[data.index])
                                 .with_message("This token")
                                 .with_color(Color::Red))
-                            .finish())
+                            .finish());
+                            return Err(())
                         }
                     }
                 }
@@ -517,10 +609,11 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
             Token::String(interned_string) => todo!(),
             Token::Char(_) => todo!(),
             _ => {
-                return Err(Report::build(ReportKind::Error, data.spans[data.index])
+                data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
                 .with_message("Expected operand, found invalid token")
                 .with_label(Label::new(data.spans[data.index]).with_message("This token").with_color(Color::Red))
-                .finish())
+                .finish());
+                return Err(());
             }
         };
         loop {
@@ -537,7 +630,6 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                         lhs = Expression::Binary { lhs: Box::new(lhs), op: bin_op, rhs: Box::new(rhs) };
                     },
                     Infix::Property => {
-                        let ident_token = data.index;
                         let ident = data.take_ident()?;
                         lhs = Expression::Property { e: Box::new(lhs), name: ident.0, name_token: ident.1 };
                     },
@@ -546,13 +638,14 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                         let rhs = pratt(data, 0)?;
                         let t = data.take();
                         if *t != Token::Special(Special::SquareBracketClose) {
-                            return Err(Report::build(ReportKind::Error, data.spans[data.index-1])
+                            data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
                                     .with_message("Expected closing square bracket, found invalid token")
                                     .with_labels(vec![
                                             Label::new(data.spans[data.index-1]).with_message("This token").with_color(Color::Red),
                                             Label::new(opening).with_message("The start of the index operation")
                                         ])
-                                    .finish())
+                                    .finish());
+                            return Err(());
                         }
                         lhs = Expression::Binary { lhs: Box::new(lhs), op: BinOp::Index, rhs: Box::new(rhs) };
                     },
@@ -593,9 +686,9 @@ mod tests {
     #[test]
     fn expr() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = "1 + 2 * 3 / 4)";
+        let code = "1 + 2 * 3 / 4";
         let compare = "(1 + ((2 * 3) / 4))";
-        let cache = ReportSourceCache::new(&Sources {
+        let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
             source_strings: vec![code.to_string()]
         });
@@ -612,11 +705,67 @@ mod tests {
                     tokens: &tokens,
                     spans: &spans,
                     index: 1,
+                    strings: &strings,
+                    errors: vec![],
                 };
-                let expr = parse_expr(&mut data).map_err(|r| r.print(cache).unwrap())?;
-                if format!("{}", expr) != compare {
-                    println!("Result: {}", expr);
-                    println!("expected: {}", compare);
+                let expr = parse_expr(&mut data);
+                match expr {
+                    Ok(expr) => {
+                        if format!("{}", expr) != compare {
+                            println!("Result: {}", expr);
+                            println!("expected: {}", compare);
+                            return Err(());
+                        }
+                    },
+                    Err(_) => {
+                        for r in data.errors {
+                            r.print(&mut cache).unwrap();
+                        }
+                        return Err(());
+                    }
+                }
+            },
+            Err(r) => {
+                r.print(cache).unwrap();
+                return Err(());
+            },
+        }
+        return Ok(());
+        
+        
+        
+        
+        
+    }
+    
+    
+    #[test]
+    fn module() -> Result<(), ()> {
+        let strings = StringTable::new();
+        let code = "fn test() { a = 2 a }";
+        let mut cache = ReportSourceCache::new(&Sources {
+            source_files: vec![PathBuf::from("test.rsl")],
+            source_strings: vec![code.to_string()]
+        });
+        let res = tokenize(code, 0, &strings);
+        match res {
+            Ok((tokens, spans)) => {
+                let spans = spans.iter().map(|r| SourceSpan {
+                    file: 0,
+                    start: r.start,
+                    end: r.end,
+                }).collect::<Vec<_>>();
+                let mut data = ParserData {
+                    file: 0,
+                    tokens: &tokens,
+                    spans: &spans,
+                    index: 1,
+                    strings: &strings,
+                    errors: vec![],
+                };
+                let _m = parse_module(&mut data, &mut vec![], true);
+                if ! data.errors.is_empty() {
+                    data.errors.iter().for_each(|e| e.eprint(&mut cache).unwrap());
                     return Err(());
                 }
             },

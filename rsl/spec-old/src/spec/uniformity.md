@@ -1,6 +1,8 @@
 # Uniformity
 
-Uniformity exists at the workgroup and subgroup level. Where something isn't uniform on the workgroup or subgroup level, it is said to be non-uniform. If something is uniform at the workgroup level, it is also uniform at the subgroup level.
+Uniformity exists at the workgroup and subgroup level. Where something isn't uniform on the workgroup or subgroup level, it is said to be non-uniform. If something is uniform at the workgroup level, it is also uniform at the subgroup level. For entrypoint types without explicit workgroups, workgroup uniformity is interpreted to mean uniform across a whole API call like `vkDraw*`.
+
+TODO: Maybe store workgroup uniform variables in workgroup memory to reduce scalar register pressure?
 
 
 ## Value Uniformity
@@ -13,12 +15,14 @@ A notable exception are references and pointers: Loading from pointers results i
 
 Uniformity is encoded in the type system: A type specifies its uniformity, and only values that are at least as uniform as specified can be stored there. Due to inference this should be mostly negligible, but function signatures have to specify their type uniformity (or use generics in the future).
 
+Value uniformity is limited my control flow uniformity. E.g. loading a uniform value in a subgroup uniform block actually results in a subgroup uniform value instead of a workgroup uniform one.
+
 
 ## Control Flow Uniformity
 
 
 Control flow starts as workgroup uniform upon starting the entrypoint, but can diverge by branching on subgroup or non-uniform values. In such cases, uniformity is restored when exiting the control flow structure that caused it to diverge. An exception to that are return statements. Without the maximal reconvergence capability, returning inside non-uniform control flow is not allowed, however the compiler may hoist the return out of the non-uniform region in the future. The maximal recovergence capability ensures that uniformity is restored to the most uniform possible at any point in the program, including using function returns as a reconvergence point.
 
-Because some intrinsics require some degree of uniformity, like sampling textures and subgroup operations, functions can define the needed amount of control flow uniformity to be  allowed to be called. This ensures the compiler can put the blame on the caller code instead of generating a uniformity violation error for intrinsics inside the function.
+Because some intrinsics require some degree of uniformity, like sampling textures and subgroup operations, functions can define the needed amount of control flow uniformity to be allowed to be called. This ensures the compiler can put the blame on the caller code instead of generating a uniformity violation error for intrinsics inside the function.
 
 

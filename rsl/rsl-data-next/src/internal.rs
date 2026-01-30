@@ -98,6 +98,8 @@ pub enum StorageClass {
     Workgroup,
     Uniform,
     UniformConstant,
+    // The umbrella storage class for anything not physical. Will be converted into concrete storage classes via monomorphization.
+    Logical,
 }
 
 
@@ -131,11 +133,11 @@ pub struct CompilerData {
     /// Lexer generated data
     pub lexed: RefCell<Vec<LexedFile>>,
     
-    /// Parsed modules
+    /// Parsed modules, with their global path as the key
     pub parsed_modules: RefCell<HashMap<InternedString, ModuleData>>,
     
-    
-    pub symbol_tables: RefCell<Vec<SymbolTable>>,
+    // The global symbol table directly converted from the AST and unresolved, which makes replacing modules easy
+    pub symbol_tables: RefCell<SymbolTable>,
     
     
     
@@ -144,12 +146,25 @@ pub struct CompilerData {
 
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Uniformity {
-    Uni,
-    Suni,
-    Nuni,
+    Dispatch,
+    Workgroup,
+    Subgroup,
+    Invocation,
     Generic(InternedString)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ShaderType {
+    /// Can be called from any shader type
+    Generic,
+    Compute,
+    Vertex,
+    Fragment,
+    Task,
+    Mesh,
+    // TODO ray tracing
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,6 +255,7 @@ impl ariadne::Cache<usize> for ReportSourceCache {
 #[derive(Debug, Clone)]
 pub enum Builtin {
     GlobalInvocationId,
+    
 }
 
 
@@ -258,7 +274,7 @@ pub enum Attribute {
     Builtin(Builtin),
     Push(),
     Spec(),
-    Compute(),
+    Exported,
     Unsafe(UnsafeAttribute),
     Lang(LangAttribute),
 }

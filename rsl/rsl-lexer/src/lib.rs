@@ -1,4 +1,4 @@
-use std::{cell::{Cell, RefCell}, collections::HashMap, ops::Range};
+use std::{cell::{Cell, RefCell}, collections::HashMap, ops::Range, str::FromStr};
 
 use ariadne::{Color, Label, Report};
 use unicode_segmentation::UnicodeSegmentation;
@@ -78,15 +78,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         keywords.insert("let", Let);
         keywords.insert("break", Break);
         keywords.insert("continue", Continue);
-        keywords.insert("uni", Uni);
-        keywords.insert("suni", SUni);
-        keywords.insert("nuni", Nuni);
-        keywords.insert("Storage", Storage);
-        keywords.insert("PhysicalStorage", PhysicalStorage);
-        keywords.insert("Uniform", Uniform);
-        keywords.insert("Workgroup", Workgroup);
-        keywords.insert("Function", Function);
-        keywords.insert("Private", Private);
+        keywords.insert("let", Let);
         keywords.insert("static", Static);
         keywords.insert("trait", Trait);
         keywords.insert("unsafe", Unsafe);
@@ -202,17 +194,6 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         return Ok(());
     };
     
-    let check_generic_uniformity = || {
-        let start = i.get();
-        if let Some(c) = ascii_char_at(i.get())? {
-            if c == '#' {
-                let s = must_ident()?;
-                spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
-                tokens.borrow_mut().push(Token::Uniformity(strings.insert_get(s)));
-            }
-        }
-        return Ok(());
-    };
     
     let check_comment = || {
         if let Some(c) = ascii_char_at(i.get())? {
@@ -301,8 +282,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
     };
     
     
-    let check_float = |whole: f64, start: usize| {
-        let fraction_start = i.get();
+    let check_float = |start: usize| {
         loop {
             if let Some(c) = ascii_char_at(i.get())? {
                 if c.is_ascii_digit() {
@@ -314,18 +294,9 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                 break;
             }
         }
-        let fs = &code[fraction_start..i.get()];
+        let fs = &code[start..i.get()];
         let span = SourceSpan { file, start, end: i.get() };
-        let mut number = whole;
-        if fs.len() != 0 {
-            if let Ok(fraction) = u128::from_str_radix(fs, 10) {
-                number += fraction as f64 / 10.0_f64.powf(fs.len() as f64);
-            } else {
-                return Err(Report::build(ariadne::ReportKind::Error, span)
-                .with_message(format!("Float fractional part too big"))
-                .with_label(Label::new(span).with_message("Here").with_color(Color::Red)).finish());
-            }
-        }
+        let number = f64::from_str(fs).unwrap();
         spans.borrow_mut().push(span);
         tokens.borrow_mut().push(Token::Float(number));
         return Ok(());
@@ -385,18 +356,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                                     .with_message(format!("Float literals are only supported in decimal notation"))
                                     .with_label(Label::new(span).with_message("Non-decimal float literal").with_color(Color::Red)).finish());
                             }
-                            match u128::from_str_radix(&code[number_start..(i.get()-1)], 10) {
-                                Ok(whole) => {
-                                    check_float(whole as f64, start)?;
-                                    return Ok(());
-                                },
-                                Err(_) => {
-                                    let span = SourceSpan { file, start, end: i.get()-1 };
-                                    return Err(Report::build(ariadne::ReportKind::Error, span)
-                                    .with_message(format!("Float whole part too big"))
-                                    .with_label(Label::new(span).with_message("Here").with_color(Color::Red)).finish());
-                                },
-                            }
+                            check_float(start)?;
                         }
                         i.set(i.get()-1);
                         break;
@@ -437,7 +397,6 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         
         gobble_whitespace()?;
         check_keyword_ident()?;
-        check_generic_uniformity()?;
         check_comment()?;
         check_special()?;
         check_int_float()?;

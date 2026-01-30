@@ -1,6 +1,6 @@
 # Borrow Rules
 
-The borrowing rules for RSL are a lot simpler and more restrictive than Rust's (for simplicity of Compiler development). However, like Rust, the precise model could change in the future.
+The borrowing rules for RSL are a lot simpler and more restrictive than Rust's (for simplicity of compiler development). However, like Rust, the precise model could change in the future.
 
 For now:
 - There can be either a mutable or an arbitrary number of immutable borrows.
