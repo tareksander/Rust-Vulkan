@@ -107,8 +107,7 @@ mod tests {
     #[test]
     fn simple() {
         let strings = StringTable::new();
-        let module = strings.insert_get("test");
-        let symbols = SymbolTable::new(module);
+        let symbols = SymbolTable::new();
         
         
         

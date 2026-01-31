@@ -4,3 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+rsl-data = { path = "../rsl-data" }
+rsl-lexer = { path = "../rsl-lexer" }
+rsl-parser = { path = "../rsl-parser" }
+rsl-type-checker = { path = "../rsl-type-checker" }
+rsl-borrow-checker = { path = "../rsl-borrow-checker" }
+rsl-spirv = { path = "../rsl-spirv" }
+
+
+

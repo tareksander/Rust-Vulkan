@@ -1,5 +1,5 @@
 [workspace]
-members = [ "examples/gravity", "rsl/rsl-borrow-checker", "rsl/rsl-data-next", "rsl/rsl-lexer", "rsl/rsl-lsp", "rsl/rsl-parser", "rsl/rsl-type-checker", "slang-build", "vk-2d","vk-ecs"]
+members = [ "rsl/rsl-borrow-checker", "rsl/rslc", "rsl/rsl-data", "rsl/rsl-lexer", "rsl/rsl-lsp", "rsl/rsl-parser", "rsl/rsl-spirv", "rsl/rsl-type-checker" ]
 resolver = "3"
 
 

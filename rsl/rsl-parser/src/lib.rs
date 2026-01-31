@@ -289,11 +289,25 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
         Token::Special(Special::Star) => {
             let start = TokenRange::point(data.file, data.index);
             data.take();
-            let mut mutability = Mutability::Mutable;
-            if *data.peek() == Token::Keyword(Keyword::Const) {
-                data.take();
-                mutability = Mutability::Immutable;
+            let mutability;
+            match *data.peek() {
+                Token::Keyword(Keyword::Const) => {
+                    mutability = Mutability::Immutable;
+                }
+                Token::Keyword(Keyword::Mut) => {
+                    mutability = Mutability::Mutable;
+                }
+                _ => {
+                    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                        .with_message("Expected const or mut, found invalid token")
+                        .with_label(Label::new(data.spans[data.index-1])
+                            .with_message("This token")
+                            .with_color(Color::Red))
+                        .finish());
+                    return Err(());
+                }
             }
+            data.take();
             return Ok(Type::Pointer { star_token: start, uni, mutability, ty: Box::new(parse_type(data, None)?) });
         },
         Token::Special(Special::And) => {
@@ -742,7 +756,7 @@ mod tests {
     #[test]
     fn module() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = "fn test() { a = 2 a }";
+        let code = "fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID] = a[globalInvocationID] + b[globalInvocationID]; }";
         let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
             source_strings: vec![code.to_string()]

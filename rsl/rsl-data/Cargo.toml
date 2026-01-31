@@ -5,6 +5,6 @@ edition = "2024"
 
 [dependencies]
 
-unicode-segmentation.workspace = true
 bitflags.workspace = true
+hashbrown.workspace = true
 ariadne.workspace = true

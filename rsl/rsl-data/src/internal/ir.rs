@@ -4,11 +4,14 @@
 use std::{cell::RefCell, collections::HashMap, sync::LazyLock};
 
 
-use crate::internal::{StringTable, Visibility};
+use crate::internal::{Builtin, StringTable, Visibility};
 
 use super::{ast::{self, BinOp, GenericArgDefinition, GenericsConstraint, ItemPath, TokenRange, UnOp}, Attribute, InternedString, StorageClass, Uniformity};
 
 
+
+
+pub mod astconvert;
 
 
 /// Resolved item paths are global paths where generics information is already resolved and included
@@ -21,25 +24,18 @@ pub struct SymbolID(pub usize);
 
 
 pub struct SymbolTable {
-    path: InternedString,
     map: HashMap<InternedString, usize>,
     items: Vec<(Visibility, GlobalItem)>,
 }
 
 
 impl SymbolTable {
-    pub fn new(path: InternedString) -> Self {
+    pub fn new() -> Self {
         Self {
-            path,
             map: HashMap::with_capacity(1024),
             items: Vec::with_capacity(1024),
         }
     }
-    
-    pub fn path(&self) -> InternedString {
-        self.path
-    }
-    
     
     pub fn lookup(&self, path: &InternedString) -> Option<&(Visibility, GlobalItem)> {
         self.map.get(path).and_then(|i| Some(&self.items[*i]))
@@ -91,10 +87,17 @@ impl SymbolTable {
     }
     
     pub fn core(strings: StringTable) -> Self {
-        let mut t = SymbolTable::new(strings.insert_get("core"));
+        let mut t = SymbolTable::new();
         
         
-        t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(TypeVariant::Primitive(Primitive::U32)))).unwrap();
+        t.insert(strings.insert_get("globalInvocationID"), (Visibility::Pub, GlobalItem::Static {
+            attrs: vec![Attribute::Builtin(Builtin::GlobalInvocationId)],
+            ident_token: TokenRange { file: 0, range: 0..0 },
+            ty: Type {
+                uni: Some(Uniformity::Invocation),
+                var: TypeVariant::Vector { components: 3, ty: Primitive::U32 },
+            },
+        })).unwrap();
         
         // TODO make declarative macro to help
         t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(TypeVariant::Primitive(Primitive::U32)))).unwrap();
@@ -153,12 +156,6 @@ pub enum GlobalItem {
         id: SymbolID,
     },
     
-    /// The global vector type. The actual data is in the corresponding Type enum.
-    Vector,
-    /// The global vector type. The actual data is in the corresponding Type enum.
-    Matrix,
-    Array,
-    RuntimeArray,
     Placeholder,
     Type(TypeVariant),
     Module(SymbolTable),
@@ -205,6 +202,10 @@ pub enum TypeVariant {
     Pointer {
         class: StorageClass,
         ty: Box<Type>,
+    },
+    Reference {
+        class: StorageClass,
+        ty: Box<Type>,
     }
 }
 
@@ -221,6 +222,9 @@ pub enum Primitive {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IRID(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BlockID(pub usize);
 
 /// A small SSA instruction set.
 pub enum IRInstruction {
@@ -308,21 +312,28 @@ pub enum IRInstruction {
     
     
     SelectionMerge {
-        block: usize,
+        merge: BlockID,
         construct: TokenRange,
     },
     LoopMerge {
-        block: usize,
+        merge: BlockID,
+        cont: BlockID,
         construct: TokenRange,
     },
     Branch {
-        target_block: usize,
+        target_block: BlockID,
     },
     BranchConditional {
         inp: IRID,
-        true_target_block: usize,
-        false_target_block: usize,
+        true_target_block: BlockID,
+        false_target_block: BlockID,
     },
+    Phi {
+        out: IRID,
+        sources: Vec<(IRID, BlockID)>
+    }
+    
+    
     
     
 }

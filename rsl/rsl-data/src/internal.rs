@@ -137,9 +137,12 @@ pub struct CompilerData {
     pub parsed_modules: RefCell<HashMap<InternedString, ModuleData>>,
     
     // The global symbol table directly converted from the AST and unresolved, which makes replacing modules easy
-    pub symbol_tables: RefCell<SymbolTable>,
+    pub symbol_tables: RefCell<Option<SymbolTable>>,
     
-    
+    // Further data doesn't need to be cached for now, so end of struct. caching passes over symbol tables
+    // could be a good idea, but since they may depend on each other, analysis could be a bit complex, so something for the future.
+    // This incremental design should be sufficient for an LSP server with the low amounts of code a new language is going to have.
+    // The compiler can be rewritten in a query-based way later.
     
     
 }

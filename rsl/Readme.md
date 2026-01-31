@@ -1,177 +1,65 @@
-# RSL - Rusty Shading Language
+
+# Warpfield
+
+Fearless GPU programming
 
 A shading language for modern[^1] Vulkan with Rust-like syntax.
 
 🚧 This project is in early development and not fit for general usage yet. If you do want to try it out, expect bugs and breakage in future versions 🚧
 
-
-
 ````Rust
-use ::globalInvocationId;
-
-struct PushConstants {
-    a: *const PhysicalStorage uni u32,
-    b: *const PhysicalStorage uni u32,
-    c: *mut PhysicalStorage nuni u32,
-}
-
-#[push(0)]
-static PUSH: PushConstants;
-
-#[compute(1, 1, 1)]
-fn unsafe add() {
-    let i = globalInvocationId.x;
-    PUSH.C[i] = PUSH.A[i] + PUSH.B[i];
+pub compute fn add(
+    a: InvocationBuffer<u32>,
+    b: InvocationBuffer<u32>,
+    c: InvocationBuffer<u32>,
+) {
+    *c = *a + *b;
 }
 ````
 
 
+## Roadmap
 
-
-
-## Features
-
-- [x] Mostly Rust-like syntax
-    - [x] If and loops as expressions
-    - [ ] Enums
-        - [ ] Numeric
-        - [ ] With data
-    - [x] Tuples
-    - [ ] Destructuring Tuples
-        - [ ] Enums with values
-        - [ ] Match expressions
-        - [ ] Destructuring structs enums
-- [ ] Capability system
-    - [ ] Profile for Vulkan 1.3 + desktop baseline
-    - [ ] Roadmap profiles
-    - [ ] 1.4 profile
-    - [ ] Profile for Android 16
-- [ ] Vulkan buffer binding & compute shaders
-    - [ ] Scalar block layout
-    - [ ] Extended alignment
-    - [ ] Basic alignment
-- [ ] Vertex & fragment shaders
-- [ ] Image & sampler binding
-    - [ ] Builtins
-- [ ] Push constants
-- [ ] Specialization constants
-- [ ] WGSL backend?
-    - [ ] Uniformity analysis
-- [ ] Rust backend
-- [ ] Generator for Rust and C struct definitions
-    - [ ] Automatic binding assignment with generated info for consuming the SPIR-V module
-        - [ ] Bounds for automatic assignment, e.g. by the selected Vulkan profile
-- [ ] Documentation
-    - [ ] Tutorial
-        - [ ] Compute shader
-        - [ ] Vertex & fragment shader
-    - [ ] Specification
-
-
-## Detailed Roadmap
-
-- [ ] Parsing
-    - [x] Structs
-        - [ ] Impl blocks and associated functions
-    - [x] Functions
-    - [ ] Statements
-        - [x] let
-        - [ ] Destructuring let
-    - [ ] Expressions
-        - [x] Algebra
-        - [ ] If
-            - [ ] If let
-        - [ ] Match
-        - [x] Tuples
-        - [x] Assignment
-        - [ ] loops
-            - [ ] loop
-            - [ ] while
-            - [ ] do-while
-            - [ ] for (numeric)
-    - [ ] Enums
-    - [ ] Storage classes for pointers: Storage, PhysicalStorage, Uniform, Workgroup, Function, Private
-        - [ ] static pointers have a default storage class of PhysicalStorage (which is also the only allowed one)
-        - [ ] static pointers use base alignment by default. Only really important with vec3.
-            - [ ] For custom types, alignment is specified via the repr attribute
-    - [ ] Uniformity for variables: Uniform, dynamically uniform, non-uniform
-    - [ ] Attributes
-- [ ] Builtin attributes
-    - [ ] repr
-        - [ ] std430/base
-        - [ ] std140/extended
-        - [ ] scalar
-        - [x] rsl
-    - [ ] set
-    - [ ] binding
-    - [ ] stage
-        - [x] all (default)
-        - [ ] compute
-        - [ ] vertex
-        - [ ] fragment
-    - [ ] entry
-        - [ ] compute
-        - [ ] vertex
-        - [ ] fragment
-    - [ ] builtin variables
-        - [ ] global & local invocation ID for compute
-        - [ ] base instance
-        - [ ] base vertex
-        - [ ] clip distance
-        - [ ] cull distance
-        - [ ] device index
-        - [ ] draw index
-        - [ ] frag coord
-        - [ ] frag depth
-        - [ ] front facing
-        - [ ] helper invocation
-        - [ ] instance id
-        - [ ] invocation id
-        - [ ] instance index
-        - [ ] layer
-        - [ ] local invocation index
-        - [ ] num subgroups
-        - [ ] num workgroups
-        - [ ] position
-        - [ ] primitive id
-        - [ ] sample id
-        - [ ] sample mask
-        - [ ] sample position
-        - [ ] subgroup id
-        - [ ] subgroup local invocation id
-        - [ ] subgroup size
-        - [ ] vertex index
-        - [ ] view index
-        - [ ] viewport index
-        - [ ] workgroup id
-        - [ ] workgroup size
-- [ ] Checking
-    - [/] Type checking
-        - [ ] Constraint checking
-            - [ ] Constraints on buffer types
-    - [ ] Borrow checking
-- [ ] Desugaring
-    - [ ] while and to-while to loop
-    - [ ] destructuring let to multiple lets with the tuple cached in a temporary variable
-    - [ ] enums are lowered to a tag and an array of the widest type they contain, which is reinterpreted on an if let or match
-        - [ ] in the storage buffer storage class, enums use an array of u8, the pointer to which is cast to the correct type on access
-    - [ ] References as parameters or return values are desugared into pointers
-- [ ] Codegen
-    - [ ] storage buffer
-    - [ ] uniform buffer
-    - [ ] Compute
-    - [ ] Expressions
-    - [ ] Return
-    - [ ] If
-        - [ ] If-expression with phy
-    - [ ] loops
-    - [ ] storage images
-    - [ ] sampled images & samplers
-    - [ ] vertex & fragment
-
-
-
-
+- [ ] 0.1: MVP
+    - [ ] Compute shaders
+    - [ ] Images & samplers
+    - [ ] Struct definition builder for Rust
+    - [ ] Work graphs by dispatching from a compute shader
+- [ ] 0.2: Shading
+    - [ ] Vertex shaders
+    - [ ] Fragment shaders
+    - [ ] Draw calls and render passes from compute shaders
+- [ ] 0.4: Borrow checking & lifetimes
+    - [ ] Some borrow checker implementation, probably more simplistic than Rust
+    - [ ] Data flow analysis based on borrows to run dispatches and draws in parallel without synchronization in between when possible
+- [ ] 0.5: Capability enforcement & profiles
+    - [ ] Capabilities will be correctly enforced
+    - [ ] Profiles for common capability sets
+    - [ ] Custom profiles via toml files
+- [ ] 0.6: Polishing the language
+    - [ ] Look for any deficiencies
+    - [ ] Fastmath controls
+- [ ] 0.7: Extensions
+    - [ ] Add more SPIR-V extensions
+    - [ ] Cooperative matrices
+    - [ ] Ray tracing
+    - [ ] Mesh shaders
+    - [ ] Shader Clock
+- [ ] 0.8
+    - [ ] Struct definition builder for C
+    - [ ] Standard library
+        - [ ] optimized prefix sum
+        
+- [ ] 1.0
+    - [ ] Stabilize the compiler API
+    - [ ] Rust Macro API
+    - [ ] Test tool
+    - [ ] SPIR-V interpreter for catching memory model violations and UB
+- [ ] 1.1
+    - [ ] Python bindings
+    - [ ] Better iGPU support
+        - [ ] DGC not required, instead the shared memory with relatively low latency between CPU and GPU can be used to encode command buffers from the CPU
+        - [ ] Use host image copy and eliminate potential redundant copys (because host and device memory are expected to be the same, with a large heap that is device local and host visible)
 
 
 ## Setup
@@ -180,17 +68,14 @@ A correctly installed [Vulkan SDK][vksdk] is needed, with all programs accessibl
 
 
 
-
-
 ### Why not `rust-gpu`?
 
-`rust-gpu` aims to compile the full Rust language to SPIR-V. However, many algorithms could benefit from a better implementation on a SIMT architecture anyways, so full source compatibility shouldn't be needed.
-
+`rust-gpu` aims to compile the full Rust language to SPIR-V. However, many algorithms could benefit from a better implementation on a SIMT architecture anyways, so full source compatibility shouldn't be needed. As a side effect, you can integrate GPU concepts like uniformity deeper into the compiler to get better error messages and inlay hints for performance guides to detect divergent control flow.
 
 
 ### Why not [WGSL][wgsl]?
 
-[WGSL][wgsl] is mostly rust-like, but a completely safe and limited subset of shading languages. With enough extensions to cover all of SPIR-V, you'd have a whole different language than standard WGSL anyways.
+[WGSL][wgsl] is mostly Rust-like, but a completely safe and limited subset of shading languages. With enough extensions to cover all of SPIR-V, you'd have a whole different language than standard WGSL anyways.
 
 
 ### Why not [Slang][slang]?
@@ -205,13 +90,13 @@ A correctly installed [Vulkan SDK][vksdk] is needed, with all programs accessibl
 
 
 
-
-
-[^1]: Features that are both in Android Baseline Profile 2022 and in Vulkan Desktop Baseline Profile 2022 will always be required. During initial development of the language, the main target will be Desktop Baseline Profile 2024 and Android 15. The requirements may be raised to that if no use case for lower versions arises.
+[^1]: The target during initial development will be Vulkan 1.4 + Roadmap 2024 + descriptor indexing, with the runtime optimized for dedicated desktop GPUs. Advanced features will always require device-generated-commands, a CPU roundtrip or a future cross-vendor work graphs extension.
 
 
 [slang]: https://shader-slang.org/
 [wgsl]: https://gpuweb.github.io/gpuweb/wgsl/
 [vksdk]: https://vulkan.lunarg.com/sdk/home
+
+
 
 

@@ -343,6 +343,10 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                         }
                         if ty == LiteralType::Dec {
                             if ! c.is_ascii_digit() {
+                                if i.get() == start + 1 {
+                                    i.set(start);
+                                    return Ok(());
+                                }
                                 return Err(Report::build(ariadne::ReportKind::Error, span1)
                                     .with_message(format!("Invalid digit in decimal int literal"))
                                     .with_label(Label::new(span2).with_message("Here").with_color(Color::Red)).finish());
@@ -355,6 +359,11 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                                 return Err(Report::build(ariadne::ReportKind::Error, span)
                                     .with_message(format!("Float literals are only supported in decimal notation"))
                                     .with_label(Label::new(span).with_message("Non-decimal float literal").with_color(Color::Red)).finish());
+                            } else {
+                                if i.get() == start + 1 {
+                                    i.set(start);
+                                    return Ok(());
+                                }
                             }
                             check_float(start)?;
                         }

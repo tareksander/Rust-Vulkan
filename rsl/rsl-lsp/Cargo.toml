@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rsl-data = { path = "../rsl-data-next" }
+rsl-data = { path = "../rsl-data" }
 serde_json.workspace = true
 serde.workspace = true
 
