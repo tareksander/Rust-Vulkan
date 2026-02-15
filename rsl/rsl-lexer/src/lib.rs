@@ -112,6 +112,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         special.insert('|', Bar);
         special.insert('&', And);
         special.insert('=', Equals);
+        special.insert('#', Hash);
     }
     
     let mut special_double = HashMap::new();

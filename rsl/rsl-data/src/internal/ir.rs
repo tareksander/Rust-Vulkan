@@ -1,13 +1,12 @@
 
 
 
-use std::{cell::RefCell, collections::HashMap, sync::LazyLock};
+use std::{cell::RefCell, collections::HashMap};
 
 
-use crate::internal::{Builtin, StringTable, Visibility};
+use crate::internal::{Builtin, Mutability, ShaderType, StringTable, Visibility, ast::ItemPathSegment};
 
 use super::{ast::{self, BinOp, GenericArgDefinition, GenericsConstraint, ItemPath, TokenRange, UnOp}, Attribute, InternedString, StorageClass, Uniformity};
-
 
 
 
@@ -23,6 +22,8 @@ pub struct ResolvedItemPath(pub InternedString);
 pub struct SymbolID(pub usize);
 
 
+
+#[derive(Debug)]
 pub struct SymbolTable {
     map: HashMap<InternedString, usize>,
     items: Vec<(Visibility, GlobalItem)>,
@@ -35,6 +36,49 @@ impl SymbolTable {
             map: HashMap::with_capacity(1024),
             items: Vec::with_capacity(1024),
         }
+    }
+    
+    #[allow(non_snake_case)]
+    pub fn new_prelude(strings: &StringTable) -> Self {
+        let mut m = Self {
+            map: HashMap::with_capacity(1024),
+            items: Vec::with_capacity(1024),
+        };
+        
+        let c = strings.insert_get("core");
+        
+        
+        let globalInvocationID = strings.insert_get("globalInvocationID");
+        m.insert(globalInvocationID, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
+            ItemPathSegment {
+                ident: c,
+                ident_token: TokenRange { file: 0, range: 0..0 },
+                generic_args: vec![]
+            },
+            ItemPathSegment {
+                ident: globalInvocationID,
+                ident_token: TokenRange { file: 0, range: 0..0 },
+                generic_args: vec![]
+            }
+        ], global: true } })).unwrap();
+        
+        let tu32 = strings.insert_get("u32");
+        m.insert(tu32, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
+            ItemPathSegment {
+                ident: c,
+                ident_token: TokenRange { file: 0, range: 0..0 },
+                generic_args: vec![]
+            },
+            ItemPathSegment {
+                ident: tu32,
+                ident_token: TokenRange { file: 0, range: 0..0 },
+                generic_args: vec![]
+            }
+        ], global: true } })).unwrap();
+        
+        
+        
+        return m;
     }
     
     pub fn lookup(&self, path: &InternedString) -> Option<&(Visibility, GlobalItem)> {
@@ -86,21 +130,19 @@ impl SymbolTable {
         self.items[id.0] = item;
     }
     
-    pub fn core(strings: StringTable) -> Self {
+    pub fn core(strings: &StringTable) -> Self {
         let mut t = SymbolTable::new();
         
         
         t.insert(strings.insert_get("globalInvocationID"), (Visibility::Pub, GlobalItem::Static {
             attrs: vec![Attribute::Builtin(Builtin::GlobalInvocationId)],
             ident_token: TokenRange { file: 0, range: 0..0 },
-            ty: Type {
-                uni: Some(Uniformity::Invocation),
-                var: TypeVariant::Vector { components: 3, ty: Primitive::U32 },
-            },
+            uni: Uniformity::Invocation,
+            ty: Type::Vector { components: 3, ty: Primitive::U32 },
         })).unwrap();
         
         // TODO make declarative macro to help
-        t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(TypeVariant::Primitive(Primitive::U32)))).unwrap();
+        t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(Type::Primitive(Primitive::U32)))).unwrap();
         
         
         
@@ -110,9 +152,23 @@ impl SymbolTable {
     }
     
     
+    pub fn eval_constexprs(&mut self) {
+        // evaluate definitive constexprs, that is constant initializers, generic value arguments, and array and vector lengths
+        
+        
+        todo!()
+    }
+    
+    pub fn resolve_paths(&mut self) {
+        
+        
+        
+        todo!()
+    }
+    
 }
 
-
+#[derive(Debug)]
 pub enum GlobalItem {
     /// Generic struct. Should be resolved after type checking and can then be ignored.
     StructTemplate {
@@ -137,6 +193,7 @@ pub enum GlobalItem {
     Static {
         attrs: Vec<Attribute>,
         ident_token: TokenRange,
+        uni: Uniformity,
         ty: Type,
     },
     FunctionTemplate {
@@ -146,7 +203,6 @@ pub enum GlobalItem {
     },
     Function(Function),
     Import {
-        public: bool,
         path: ItemPath,
     },
     // TODO import from another symbol table, to make symbol tables for packages more disposable for an LSP.
@@ -157,28 +213,23 @@ pub enum GlobalItem {
     },
     
     Placeholder,
-    Type(TypeVariant),
+    Type(Type),
     Module(SymbolTable),
 }
 
-
+#[derive(Debug)]
 pub struct Function {
     pub attrs: Vec<Attribute>,
     pub ident_token: TokenRange,
-    pub params: Vec<(InternedString, TokenRange, Type)>,
-    pub ret: Type,
+    pub shader_type: ShaderType,
+    pub params: Vec<(InternedString, TokenRange, Uniformity, Type)>,
+    pub ret: (Type, Uniformity),
     pub blocks: RefCell<Vec<IRBlock>>,
 }
 
 
 #[derive(Debug, Clone)]
-pub struct Type {
-    pub uni: Option<Uniformity>,
-    pub var: TypeVariant,
-}
-
-#[derive(Debug, Clone)]
-pub enum TypeVariant {
+pub enum Type {
     Unresolved(ItemPath),
     /// Only valid for concrete structs and traits. Should be generated by the type checking stage via monomorphisation.
     Resolved(SymbolID),
@@ -196,16 +247,22 @@ pub enum TypeVariant {
         length: usize,
         ty: Box<Type>,
     },
+    UnresolvedArray {
+        length: ast::Expression,
+        ty: Box<Type>,
+    },
     RuntimeArray {
         ty: Box<Type>,
     },
     Pointer {
         class: StorageClass,
         ty: Box<Type>,
+        mutability: Mutability,
     },
     Reference {
         class: StorageClass,
         ty: Box<Type>,
+        mutability: Mutability,
     }
 }
 
@@ -223,9 +280,20 @@ pub enum Primitive {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IRID(pub usize);
 
+impl IRID {
+    /// Increments the current id by 1 and returns a copy of the last value.
+    pub fn next(&mut self) -> IRID {
+        let i = *self;
+        self.0 += 1;
+        return i;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockID(pub usize);
 
+
+#[derive(Debug)]
 /// A small SSA instruction set.
 pub enum IRInstruction {
     /// An unresolved path. Should be eliminated by path canonicalization.
@@ -234,23 +302,30 @@ pub enum IRInstruction {
         path: ItemPath,
         tokens: TokenRange,
         id: IRID,
+        /// Whether an lvalue or an rvalue is needed. If an rvalue is needed, a load instruction will be inserted for the resolved path.
+        /// If an lvalue is needed for a constant, a temporary variable is created and the value stored there, and its id replaces the one of the path.
+        lvalue: bool,
     },
     
     /// A path that has been resolved into a global symbol ID.
     /// Only functions and statics can be used like this.
     /// Type information is stored in the symbol.
+    /// In any case, if the symbol isn't a constant, it is a pointer to the memory location, not the value itself.
     ResolvedPath {
         path: SymbolID,
-        token: TokenRange,
+        tokens: TokenRange,
         id: IRID,
     },
     
     Local {
         ident: InternedString,
         ident_token: TokenRange,
+        /// Optimization passes may convert local variables to SSA, but only after error-generating stages so that mapping info is still readily available.
+        /// For SPIR-V debug info, mapping info should still be kept in a side-table.
         id: IRID,
-        /// None for a type to be inferred.
+        /// None for a type to be inferred. Technically the type is a pointer to the supplied type with the function storage class, but that is implied.
         ty: Option<Type>,
+        uni: Uniformity
     },
     
     // TODO trait method invocation
@@ -261,7 +336,7 @@ pub enum IRInstruction {
         op: UnOp,
         out: IRID,
         span: TokenRange,
-        // no type, unary and binary operators have the same input as output types, except assignment (which has Unit).
+        // no type, unary and binary operators have the same input as output types.
     },
     
     BinOp {
@@ -270,7 +345,23 @@ pub enum IRInstruction {
         rhs: IRID,
         out: IRID,
         span: TokenRange,
-        // no type, unary and binary operators have the same input as output types, or a predefined output (bool for comparisons), except assignment (which has Unit).
+        // no type, unary and binary operators have the same input as output types, or a predefined output (bool for comparisons).
+        // assignments shouldn't be an IR operation, they are immediately desugared to a store operation.
+    },
+    
+    
+    Unit {
+        out: IRID
+    },
+    
+    Load {
+        ptr: IRID,
+        out: IRID,
+    },
+    
+    Store {
+        ptr: IRID,
+        value: IRID,
     },
     
     Property {
@@ -287,6 +378,7 @@ pub enum IRInstruction {
         span: TokenRange,
     },
     
+    /// Constant integer value.
     Int {
         v: u128,
         id: IRID,
@@ -295,6 +387,7 @@ pub enum IRInstruction {
         ty: Option<Type>,
     },
     
+    /// Constant float value
     Float {
         v: f64,
         id: IRID,
@@ -304,29 +397,45 @@ pub enum IRInstruction {
     },
     
     
+    /// Performs a cast from one type to another. Only valid for numbers and pointers, for pointers to references, and for mutable to immutable references.
     Cast {
         inp: IRID,
         out: IRID,
         ty: Type,
     },
     
-    
-    SelectionMerge {
-        merge: BlockID,
-        construct: TokenRange,
+    /// Reduces the uniformity of a value by spreading it out over the lower scope.
+    Spread {
+        inp: IRID,
+        out: IRID,
+        uni: Uniformity
     },
-    LoopMerge {
-        merge: BlockID,
+    
+    ReturnValue {
+        id: IRID,
+        token_id: TokenRange,
+    },
+    
+    Return {
+        token_id: TokenRange,
+    },
+    
+    Loop {
+        header: BlockID,
+        body: BlockID,
         cont: BlockID,
+        merge: BlockID,
         construct: TokenRange,
     },
     Branch {
         target_block: BlockID,
     },
-    BranchConditional {
+    If {
         inp: IRID,
         true_target_block: BlockID,
         false_target_block: BlockID,
+        merge: BlockID,
+        construct: TokenRange,
     },
     Phi {
         out: IRID,
@@ -338,6 +447,7 @@ pub enum IRInstruction {
     
 }
 
+#[derive(Debug)]
 pub struct IRBlock {
     pub instructions: Vec<IRInstruction>,
 }

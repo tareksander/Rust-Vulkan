@@ -4,3 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rsl-data = { path = "../rsl-data" }
+bitflags.workspace = true
+hashbrown.workspace = true
+ariadne.workspace = true
+
+
+
+
+[dev-dependencies]
+rsl-parser = { path = "../rsl-parser" }
+rsl-lexer = { path = "../rsl-lexer" }

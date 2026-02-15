@@ -99,7 +99,7 @@ impl<'a> ParserData<'a> {
 
 
 
-pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Vec<Attribute>, strings: &StringTable) -> ModuleData {
+pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Vec<Attribute>, strings: &StringTable) -> (ModuleData, Vec<Report<'static, SourceSpan>>) {
     let mut data = ParserData {
         file,
         tokens,
@@ -108,7 +108,8 @@ pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Ve
         strings,
         errors: vec![],
     };
-    parse_module_file(&mut data, attrs)
+    let m = parse_module_file(&mut data, attrs);
+    return (m, data.errors);
 }
 
 fn parse_module_file(data: &mut ParserData, mut attrs: Vec<Attribute>) -> ModuleData {
@@ -180,6 +181,56 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                     return m;
                 }
             },
+            Token::Special(Special::Hash) => {
+                data.take();
+                if data.peek() != &Token::Special(Special::SquareBracketOpen) {
+                    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                        .with_message("Expected attribute, found invalid token")
+                        .with_label(Label::new(data.spans[data.index])
+                            .with_message("This token")
+                            .with_color(Color::Red))
+                        .finish());
+                    return m;
+                }
+                data.take();
+                if let Token::Ident(i) = data.peek() {
+                    let i = *i;
+                    match data.strings.lookup(i).as_str() {
+                        "compute" => {
+                            data.take();
+                            if data.peek() != &Token::Special(Special::SquareBracketClose) {
+                                data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                                    .with_message("Invalid token, attribute does not take parameters")
+                                    .with_label(Label::new(data.spans[data.index])
+                                        .with_message("This token")
+                                        .with_color(Color::Red))
+                                    .finish());
+                                return m;
+                            }
+                            data.take();
+                            attrs.push(Attribute::Compute);
+                        },
+                        
+                        _ => {
+                            data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                                .with_message("Invalid attribute")
+                                .with_label(Label::new(data.spans[data.index])
+                                    .with_message("This attribute")
+                                    .with_color(Color::Red))
+                                .finish());
+                            return m;
+                        }
+                    }
+                } else {
+                    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                        .with_message("Expected attribute, found invalid token")
+                        .with_label(Label::new(data.spans[data.index])
+                            .with_message("This token")
+                            .with_color(Color::Red))
+                        .finish());
+                    return m;
+                }
+            }
             Token::End => {
                 if ! toplevel {
                     break;
@@ -220,14 +271,14 @@ fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, 
     let generics_constraints = vec![];
     let block;
     let params;
-    let mut ret = Type::Unit;
+    let mut ret = (Type::Unit, None);
     let ident = data.take_ident()?;
     if *data.peek() == Token::Special(Special::AngleBracketOpen) {
         data.take();
         todo!()
     }
     if *data.take() == Token::Special(Special::RoundBracketOpen) {
-        params = parse_delimited(data, parse_ident_type, Token::Special(Special::Comma), Token::Special(Special::RoundBracketClose))?;
+        params = parse_delimited(data, parse_ident_uni_type, Token::Special(Special::Comma), Token::Special(Special::RoundBracketClose))?;
         if *data.take() != Token::Special(Special::RoundBracketClose) {
             data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
             .with_message("Expected ')', found invalid token")
@@ -248,7 +299,8 @@ fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, 
     }
     if *data.peek() == Token::Special(Special::ThinArrow) {
         data.take();
-        ret = parse_type(data, None)?;
+        let uni = parse_optional_uni(data);
+        ret = (parse_type(data)?, uni);
     }
     block = parse_block(data)?;
     return Ok(FunctionDefinition {
@@ -279,12 +331,59 @@ fn parse_ident_type(data: &mut ParserData) -> ParserResult<(InternedString, Toke
         .finish());
         return Err(());
     }
-    return Ok((t.0, t.1, parse_type(data, None)?));
+    return Ok((t.0, t.1, parse_type(data)?));
+}
+
+fn parse_ident_uni_type(data: &mut ParserData) -> ParserResult<(InternedString, TokenRange, Option<(Uniformity, TokenRange)>, Type)> {
+    let t = data.take_ident()?;
+    if *data.take() != Token::Special(Special::Colon) {
+        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
+        .with_message("Expected colon, found invalid token")
+        .with_label(Label::new(data.spans[data.index-1])
+            .with_message("This token")
+            .with_color(Color::Red))
+        .finish());
+        return Err(());
+    }
+    let uni = parse_optional_uni(data);
+    return Ok((t.0, t.1, uni, parse_type(data)?));
 }
 
 
+fn parse_optional_uni(data: &mut ParserData) -> Option<(Uniformity, TokenRange)> {
+    match data.peek() {
+        Token::Ident(s) => {
+            let s = *s;
+            let s = s.get(data.strings);
+            match s.as_str() {
+                "dispatch" => {
+                    let t = TokenRange::point(data.file, data.index);
+                    data.take();
+                    Some((Uniformity::Dispatch, t))
+                },
+                "workgroup" => {
+                    let t = TokenRange::point(data.file, data.index);
+                    data.take();
+                    Some((Uniformity::Workgroup, t))
+                },
+                "subgroup" => {
+                    let t = TokenRange::point(data.file, data.index);
+                    data.take();
+                    Some((Uniformity::Subgroup, t))
+                },
+                "invocation" => {
+                    let t = TokenRange::point(data.file, data.index);
+                    data.take();
+                    Some((Uniformity::Invocation, t))
+                },
+                _ => None
+            }
+        },
+        _ => None
+    }
+}
 
-fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> ParserResult<Type> {
+fn parse_type(data: &mut ParserData) -> ParserResult<Type> {
     match *data.peek() {
         Token::Special(Special::Star) => {
             let start = TokenRange::point(data.file, data.index);
@@ -308,7 +407,7 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
                 }
             }
             data.take();
-            return Ok(Type::Pointer { star_token: start, uni, mutability, ty: Box::new(parse_type(data, None)?) });
+            return Ok(Type::Pointer { star_token: start, mutability, ty: Box::new(parse_type(data)?) });
         },
         Token::Special(Special::And) => {
             let start = TokenRange::point(data.file, data.index);
@@ -318,32 +417,7 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
             
         },
         Token::Ident(s) => {
-            let s = s.get(data.strings);
-            match s.as_str() {
-                "dispatch" => {
-                    let t = TokenRange::point(data.file, data.index);
-                    data.take();
-                    return parse_type(data, Some((Uniformity::Dispatch, t)));
-                },
-                "workgroup" => {
-                    let t = TokenRange::point(data.file, data.index);
-                    data.take();
-                    return parse_type(data, Some((Uniformity::Workgroup, t)));
-                },
-                "subgroup" => {
-                    let t = TokenRange::point(data.file, data.index);
-                    data.take();
-                    return parse_type(data, Some((Uniformity::Subgroup, t)));
-                },
-                "invocation" => {
-                    let t = TokenRange::point(data.file, data.index);
-                    data.take();
-                    return parse_type(data, Some((Uniformity::Invocation, t)));
-                },
-                _ => {
-                    return Ok(Type::Path(parse_item_path(data, false)?, uni));
-                }
-            }
+            return Ok(Type::Path(parse_item_path(data, false)?));
         },
         _ => {}
     }
@@ -360,13 +434,13 @@ fn parse_type(data: &mut ParserData, uni: Option<(Uniformity, TokenRange)>) -> P
 fn parse_generic_arg(data: &mut ParserData) -> ParserResult<GenericArg> {
     match *data.peek() {
         Token::Special(Special::Star) => {
-            return Ok(GenericArg::Type(parse_type(data, None)?));
+            return Ok(GenericArg::Type(parse_type(data)?));
         },
         Token::Special(Special::And) => {
-            return Ok(GenericArg::Type(parse_type(data, None)?));
+            return Ok(GenericArg::Type(parse_type(data)?));
         },
         Token::Ident(_) => {
-            return Ok(GenericArg::Type(parse_type(data, None)?));
+            return Ok(GenericArg::Type(parse_type(data)?));
         },
         
         _ => {}
@@ -423,6 +497,7 @@ fn parse_item_path(data: &mut ParserData, in_expr: bool) -> ParserResult<ItemPat
 
 
 fn parse_block(data: &mut ParserData) -> ParserResult<Block> {
+    let mut r = TokenRange::point(data.file, data.index);
     let t = data.take();
     if *t != Token::Special(Special::CurlyBracketOpen) {
         data.errors.push(Report::build(ReportKind::Error, data.spans[data.index-1])
@@ -488,11 +563,13 @@ fn parse_block(data: &mut ParserData) -> ParserResult<Block> {
             .finish());
         return Err(());
     }
+    r.range.end = data.index;
     data.take();
     return Ok(Block {
         statements,
         value,
         label: None,
+        range: r,
     });
 }
 
@@ -588,15 +665,17 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                 if let Some(op) = PREFIX_OPS.get(t) {
                     let bp = op.1;
                     let mut op = op.0;
+                    let mut r = TokenRange::point(data.file, data.index);
                     data.take();
                     if s == Special::And {
                         if *data.peek() == Token::Keyword(Keyword::Mut) {
                             data.take();
+                            r.range.end += 1;
                             op = UnOp::RefMut;
                         }
                     }
                     let rhs = pratt(data, bp)?;
-                    Expression::Unary { e: Box::new(rhs), op: op }
+                    Expression::Unary { e: Box::new(rhs), op: op, op_range: r }
                 } else {
                     match s {
                         Special::DoubleColon => Expression::Item(parse_item_path(data, true)?),
@@ -690,9 +769,9 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{hint::black_box, path::PathBuf, time::Instant};
 
-    use rsl_data::internal::{ReportSourceCache, Sources, StringTable};
+    use rsl_data::internal::{ReportSourceCache, Sources, StringTable, ir::SymbolTable};
     use rsl_lexer::tokenize;
 
     use super::*;
@@ -756,7 +835,8 @@ mod tests {
     #[test]
     fn module() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = "fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID] = a[globalInvocationID] + b[globalInvocationID]; }";
+        let code = black_box(String::from("#[compute] fn test(a: dispatch *const u32, b: dispatch *const u32, c: dispatch *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }"));
+        let code = &code;
         let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
             source_strings: vec![code.to_string()]
@@ -777,7 +857,11 @@ mod tests {
                     strings: &strings,
                     errors: vec![],
                 };
-                let _m = parse_module(&mut data, &mut vec![], true);
+                let t1 = Instant::now();
+                let m = parse_module(&mut data, &mut vec![], true);
+                let t2 = Instant::now();
+                println!("Time: {} chars, {} ms", code.len(), (t2- t1).as_millis());
+                println!("{:#?}", SymbolTable::from_module(m, &strings));
                 if ! data.errors.is_empty() {
                     data.errors.iter().for_each(|e| e.eprint(&mut cache).unwrap());
                     return Err(());

@@ -67,6 +67,7 @@ pub enum Special {
     ThickArrow,
     Equals,
     DoubleEquals,
+    Hash,
 }
 
 

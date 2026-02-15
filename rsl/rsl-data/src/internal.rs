@@ -155,7 +155,8 @@ pub enum Uniformity {
     Workgroup,
     Subgroup,
     Invocation,
-    Generic(InternedString)
+    Generic(InternedString),
+    Inferred,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -190,13 +191,6 @@ pub struct SourceSpan {
     pub end: usize,
 }
 
-
-
-
-
-pub trait MaybeSpanned {
-    fn span(&self) -> Option<SourceSpan>;
-}
 
 
 impl ariadne::Span for SourceSpan {
@@ -255,14 +249,14 @@ impl ariadne::Cache<usize> for ReportSourceCache {
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Builtin {
     GlobalInvocationId,
     
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Layout {
     Auto,
     Std140,
@@ -271,12 +265,11 @@ pub enum Layout {
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Attribute {
     Layout(Layout),
     Builtin(Builtin),
-    Push(),
-    Spec(),
+    Compute,
     Exported,
     Unsafe(UnsafeAttribute),
     Lang(LangAttribute),
@@ -284,14 +277,14 @@ pub enum Attribute {
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnsafeAttribute {
     
 }
 
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LangAttribute {
     /// Module attribute, enables all other lang attributes.
     Core,

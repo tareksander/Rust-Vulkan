@@ -68,6 +68,8 @@ A correctly installed [Vulkan SDK][vksdk] is needed, with all programs accessibl
 
 
 
+<!-- TODO: Rethink stance on rust-gpu and slang, maybe point out the native work and render graph features of Warpfield as a reason to differentiate -->
+
 ### Why not `rust-gpu`?
 
 `rust-gpu` aims to compile the full Rust language to SPIR-V. However, many algorithms could benefit from a better implementation on a SIMT architecture anyways, so full source compatibility shouldn't be needed. As a side effect, you can integrate GPU concepts like uniformity deeper into the compiler to get better error messages and inlay hints for performance guides to detect divergent control flow.

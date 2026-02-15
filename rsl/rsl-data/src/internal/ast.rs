@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
-use crate::internal::ShaderType;
+use crate::internal::{ShaderType, tokens::Token};
 
 use super::{Attribute, InternedString, Mutability, StorageClass, Uniformity, Visibility};
 
@@ -18,13 +18,40 @@ impl TokenRange {
             range: index..(index+1)
         }
     }
+    
+    pub fn merge(&self, other: &TokenRange) -> TokenRange {
+        return TokenRange { file: self.file, range: self.range.start.min(other.range.start)..self.range.end.min(other.range.end) };
+    }
+    
+    pub fn merge_iter<I, T: Iterator<Item = I>>(&self, iter: T) -> TokenRange where I: SourceRange {
+        iter.fold(self.clone(), |r, i| r.merge(&i.range()))
+    }
 }
+
+
+impl<T> SourceRange for &T where T: SourceRange {
+    fn range(&self) -> TokenRange {
+        (*self).range()
+    }
+}
+
+
+pub trait SourceRange {
+    fn range(&self) -> TokenRange;
+}
+
 
 
 #[derive(Debug, Clone)]
 pub struct ItemPath {
     pub segments: Vec<ItemPathSegment>,
     pub global: bool,
+}
+
+impl SourceRange for ItemPath {
+    fn range(&self) -> TokenRange {
+        self.segments[1..].iter().fold(self.segments.first().unwrap().range(), |r, s| r.merge(&s.range()))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -34,7 +61,13 @@ pub struct ItemPathSegment {
     pub generic_args: Vec<GenericArg>
 }
 
-
+impl SourceRange for ItemPathSegment {
+    fn range(&self) -> TokenRange {
+        let mut r = self.ident_token.clone();
+        r = r.merge_iter(self.generic_args.iter());
+        return r;
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum GenericArg {
@@ -43,6 +76,12 @@ pub enum GenericArg {
     Expression(Expression),
     Uniformity(Uniformity, TokenRange),
     Lifetime(InternedString, TokenRange),
+}
+
+impl SourceRange for GenericArg {
+    fn range(&self) -> TokenRange {
+        todo!()
+    }
 }
 
 #[derive(Debug)]
@@ -55,27 +94,23 @@ pub enum GenericArgDefinition {
 
 #[derive(Debug, Clone)]
 pub enum Type {
-    Path(ItemPath, Option<(Uniformity, TokenRange)>),
+    Path(ItemPath),
     Pointer{
         star_token: TokenRange,
-        uni: Option<(Uniformity, TokenRange)>,
         mutability: Mutability,
         ty: Box<Type>
     },
     Reference{
         ampersand_token: TokenRange,
-        uni: Option<(Uniformity, TokenRange)>,
         mutability: Option<(Mutability, TokenRange)>,
         ty: Box<Type>
     },
     Array {
         ty: Box<Type>,
-        uni: Option<(Uniformity, TokenRange)>,
         size: Expression,
     },
     Unit,
     Inferred {
-        uni: Option<(Uniformity, TokenRange)>,
         ty: Option<Box<Type>>,
     }
 }
@@ -83,7 +118,7 @@ pub enum Type {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Unary{ e: Box<Expression>, op: UnOp},
+    Unary{ e: Box<Expression>, op: UnOp, op_range: TokenRange},
     Binary{ lhs: Box<Expression>, op: BinOp, rhs: Box<Expression>},
     Property { e: Box<Expression>, name: InternedString, name_token: TokenRange },
     Item(ItemPath),
@@ -102,10 +137,37 @@ pub enum Expression {
     Unsafe(Box<Block>),
 }
 
+
+impl SourceRange for Expression {
+    fn range(&self) -> TokenRange {
+        match self {
+            Expression::Unary { e, op, op_range } => e.range().merge(op_range),
+            Expression::Binary { lhs, op, rhs } => lhs.range().merge(&rhs.range()),
+            Expression::Property { e, name, name_token } => e.range().merge(name_token),
+            Expression::Item(item_path) => item_path.range(),
+            Expression::Group(expression) => expression.range(),
+            Expression::IntLiteral(_, token_range) => token_range.clone(),
+            Expression::FloatLiteral(_, token_range) => token_range.clone(),
+            Expression::Call(item_path, expressions) => item_path.range().merge_iter(expressions.iter()),
+            Expression::If { condition, then, other } => {
+                let mut r = condition.range().merge(&then.range());
+                if let Some(o) = other {
+                    r = r.merge(&o.range());
+                }
+                r
+            },
+            Expression::Loop { block } => block.range(),
+            Expression::Unsafe(block) => block.range(),
+        }
+    }
+}
+
+
+
 impl Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expression::Unary { e, op } => {
+            Expression::Unary { e, op , op_range: _} => {
                 f.write_str("(")?;
                 Display::fmt(op, f)?;
                 f.write_str(" ")?;
@@ -289,9 +351,9 @@ pub struct FunctionDefinition {
     pub ident_token: TokenRange,
     pub generics: Vec<GenericArgDefinition>,
     pub generics_constraints: Vec<GenericsConstraint>,
-    pub params: Vec<(InternedString, TokenRange, Type)>,
+    pub params: Vec<(InternedString, TokenRange, Option<(Uniformity, TokenRange)>, Type)>,
     pub block: Block,
-    pub ret: Type,
+    pub ret: (Type, Option<(Uniformity, TokenRange)>),
 }
 
 #[derive(Debug)]
@@ -311,20 +373,27 @@ pub struct TraitFunction {
 pub struct Block {
     pub statements: Vec<Statement>,
     pub value: Option<Expression>,
-    pub label: Option<(InternedString, TokenRange)>
+    pub label: Option<(InternedString, TokenRange)>,
+    pub range: TokenRange,
+}
+
+impl SourceRange for Block {
+    fn range(&self) -> TokenRange {
+        self.range.clone()
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Statement {
     Expression(Expression),
-    Return(Option<Expression>),
+    Return(TokenRange, Option<Expression>),
     Break {
         break_token: TokenRange,
         label :Option<(InternedString, TokenRange)>,
         value: Option<Expression>
     },
     Continue(TokenRange),
-    Let(InternedString, TokenRange, Option<Expression>),
+    Let(InternedString, TokenRange, Option<(Uniformity, TokenRange)>, Type, Option<Expression>),
 }
 
 
