@@ -16,7 +16,7 @@ enum TCType {
     Primitive(Primitive),
     Vector {
         components: Option<u8>,
-        ty: Option<Primitive>,
+        ty: Box<TCType>,
     },
     /// Must resolve to a vector or a struct, used for struct property vs vec swizzle differentiation
     VecOrStruct,
@@ -25,7 +25,7 @@ enum TCType {
     Matrix {
         rows: Option<u8>,
         cols: Option<u8>,
-        ty: Option<Primitive>,
+        ty: Box<TCType>,
     },
     Array {
         length: usize,
@@ -45,12 +45,95 @@ enum TCType {
         mutability: Option<Mutability>,
     },
     Unknown,
+    /// Points to another type variable
+    TypeVariable(TypeID),
+}
+
+impl TCType {
+    fn canonicalize(&self, data: &mut TCData) -> Self {
+        match self {
+            TCType::Vector { components, ty } => TCType::Vector { components: *components, ty: Box::new(ty.canonicalize(data)) },
+            TCType::Function { sym, params } => todo!(),
+            TCType::Matrix { rows, cols, ty } => todo!(),
+            TCType::Array { length, ty } => todo!(),
+            TCType::RuntimeArray { ty } => todo!(),
+            TCType::Reference { class, ty, mutability } => todo!(),
+            TCType::Pointer { class, ty, mutability } => TCType::Pointer { class: *class, ty: Box::new(ty.canonicalize(data)), mutability: *mutability },
+            TCType::TypeVariable(type_id) => data.unify.probe_value(*type_id).canonicalize(data),
+            _ => self.clone()
+        }
+    }
+    
+    fn unify(data: &mut TCData, v1: &Self, v2: &Self) -> Result<TCType, ()> {
+        match (v1, v2) {
+            (TCType::TypeVariable(v1), TCType::TypeVariable(v2)) => {
+                let vt1 = data.unify.probe_value(*v1);
+                let vt2 = data.unify.probe_value(*v2);
+                Self::unify(data, &vt1, &vt2).unwrap();
+                data.unify.unify_var_var(*v1, *v2).unwrap();
+                
+                
+                todo!()
+            }
+            (TCType::TypeVariable(v), o) => {
+                let vt = data.unify.probe_value(*v);
+                Self::unify(data, &vt, o).unwrap();
+                data.unify.unify_var_value(*v, o.clone()).unwrap();
+                // Since we may want to apply and propagate more constraints, the variable still has precedence
+                return Ok(TCType::TypeVariable(*v));
+            },
+            (o, TCType::TypeVariable(v)) => {
+                let vt = data.unify.probe_value(*v);
+                Self::unify(data, &vt, o).unwrap();
+                data.unify.unify_var_value(*v, o.clone()).unwrap();
+                return Ok(TCType::TypeVariable(*v));
+            },
+            
+            // Unconstrained types trivially unify
+            (TCType::Unknown, TCType::Unknown) => Ok(TCType::Unknown),
+            
+            // If one value is unknown, the defined one has precedence
+            (TCType::Unknown, a) => Ok(a.clone()),
+            (a, TCType::Unknown) => Ok(a.clone()),
+            
+            (TCType::VecOrStruct, TCType::Vector { components, ty }) => Ok(v2.clone()),
+            (TCType::Vector { components, ty }, TCType::VecOrStruct) => Ok(v1.clone()),
+            
+            (TCType::VecOrStruct, TCType::Struct(_)) => Ok(v2.clone()),
+            (TCType::Struct(_), TCType::VecOrStruct) => Ok(v1.clone()),
+            
+            
+            (TCType::Indexable, TCType::Pointer { class, ty, mutability }) => Ok(v2.clone()),
+            (TCType::Pointer { class, ty, mutability }, TCType::Indexable) => Ok(v1.clone()),
+            
+            
+            (TCType::Pointer { class: c1, ty: ty1, mutability: m1 }, TCType::Pointer { class: c2, ty: ty2, mutability: m2 }) => {
+                let mut c = *c1;
+                if *c1 != StorageClass::Logical && *c2 != StorageClass::Logical && *c1 != *c2 {
+                    panic!()
+                }
+                if c == StorageClass::Logical {
+                    c = *c2;
+                }
+                let t = Self::unify(data, ty1, ty2).unwrap();
+                if *m1 != *m2 {
+                    panic!("Incompatible pointer mutability")
+                }
+                return Ok(TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 });
+            }
+            
+            
+            _ => {todo!()}
+        }
+    }
+    
 }
 
 impl UnifyValue for TCType {
-    type Error = ();
+    type Error = NoError;
 
     fn unify_values(v1: &Self, v2: &Self) -> Result<Self, Self::Error> {
+        
         match (v1, v2) {
             // Unconstrained types trivially unify
             (TCType::Unknown, TCType::Unknown) => Ok(TCType::Unknown),
@@ -75,24 +158,26 @@ impl UnifyValue for TCType {
             (TCType::Pointer { class: c1, ty: ty1, mutability: m1 }, TCType::Pointer { class: c2, ty: ty2, mutability: m2 }) => {
                 let mut c = *c1;
                 if *c1 != StorageClass::Logical && *c2 != StorageClass::Logical && *c1 != *c2 {
-                    return Err(());
+                    panic!()
                 }
                 if c == StorageClass::Logical {
                     c = *c2;
                 }
                 let t = Self::unify_values(&**ty1, &**ty2)?;
                 if *m1 != *m2 {
-                    return Err(());
+                    panic!()
                 }
                 return Ok(TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 });
             }
             
+            // since the variable should have been unified with the other side already, just return the variable.
+            (TCType::TypeVariable(v), _) => Ok(TCType::TypeVariable(*v)),
+            (_, TCType::TypeVariable(v)) => Ok(TCType::TypeVariable(*v)),
             
             
             
             
-            
-            _ => Err(())
+            _ => panic!()
         }
     }
 }
@@ -249,6 +334,10 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
                 d.unify.unify_var_var(*a, *b).unwrap();
                 return false;
             },
+            TypeConstraint::Same(a, b) => {
+                d.unify.unify_var_var(*a, *b).unwrap();
+                return false;
+            },
             _ => {
                 return true;
             }
@@ -273,7 +362,7 @@ fn to_tctype(symbols: &SymbolTable, ty: &Type) -> TCType {
         Type::Unresolved(item_path) => todo!(),
         Type::Resolved(symbol_id) => lookup_type(symbols, *symbol_id),
         Type::Primitive(primitive) => TCType::Primitive(*primitive),
-        Type::Vector { components, ty } => TCType::Vector { components: Some(*components), ty: Some(*ty) },
+        Type::Vector { components, ty } => TCType::Vector { components: Some(*components), ty: Box::new(TCType::Primitive(*ty)) },
         Type::Matrix { rows, cols, ty } => todo!(),
         Type::Array { length, ty } => todo!(),
         Type::UnresolvedArray { length, ty } => todo!(),
