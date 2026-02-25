@@ -1,6 +1,6 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
-use crate::internal::{ Attribute, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, SymbolTable, Type}};
+use crate::internal::{ Attribute, InternedString, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, SymbolTable, Type}};
 
 
 
@@ -57,8 +57,13 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
     let ret = (type_to_ir(f.ret.0).unwrap(), f.ret.1.map(|u| u.0).unwrap_or(Uniformity::Inferred));
     let mut params = Vec::with_capacity(f.params.len());
     for p in &f.params {
-        params.push((p.0, p.1.clone(), p.2.clone().map(|u| u.0).unwrap_or(Uniformity::Inferred), type_to_ir(p.3.clone()).unwrap()));
+        params.push((p.0, p.1.clone(), p.2.clone().map(|u| u.0).unwrap_or(if is_entrypoint {
+            Uniformity::Dispatch
+        } else {
+            Uniformity::Inferred
+        }), type_to_ir(p.3.clone()).unwrap()));
     }
+    let num_params = params.len();
     let shader_type = if let Some(t) = f.shader_type {
         t.0
     } else {
@@ -68,11 +73,30 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
             ShaderType::Generic
         }
     };
+    let mut locals = HashMap::with_capacity(num_params);
     let mut blocks = vec![IRBlock { instructions: vec![] }];
-    let mut id = IRID(0);
+    {
+        let b = blocks.first_mut().unwrap();
+        for (i, p) in params.into_iter().enumerate() {
+            b.instructions.push(IRInstruction::Local {
+                ident: p.0,
+                ident_token: p.1,
+                id: IRID(i),
+                ty: Some(p.3),
+                uni: p.2,
+                mutable: Mutability::Mutable,
+            });
+            locals.insert(p.0, IRID(i));
+        }
+    }
+    
+    
+    let mut id = IRID(num_params);
     
     let r = f.block.range.clone();
-    if let Some(id) = block_to_ir(&mut blocks, f.block, &mut id) {
+    
+    
+    if let Some(id) = block_to_ir(&mut blocks, f.block, &mut id, locals) {
         blocks.last_mut().unwrap().instructions.push(IRInstruction::ReturnValue { id, token_id: r });
     }
     
@@ -81,9 +105,11 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
         attrs: f.attrs,
         ident_token: f.ident_token,
         shader_type,
-        params,
+        num_params,
         ret,
         blocks: RefCell::new(blocks),
+        next_id: RefCell::new(id),
+        types: RefCell::new(HashMap::new()),
     }));
 }
 
@@ -94,27 +120,27 @@ fn insert(blocks: &mut Vec<IRBlock>, i: IRInstruction) {
 
 
 
-fn block_to_ir(blocks: &mut Vec<IRBlock>, b: Block, id: &mut IRID) -> Option<IRID> {
+fn block_to_ir(blocks: &mut Vec<IRBlock>, b: Block, id: &mut IRID, mut locals: HashMap<InternedString, IRID>) -> Option<IRID> {
     for s in b.statements {
-        statement_to_blocks(blocks, s, id);
+        statement_to_blocks(blocks, s, id, &mut locals);
     }
     if let Some(e) = b.value {
         let range = e.range();
-        let id = expr_to_blocks(blocks, e, false, id);
+        let id = expr_to_blocks(blocks, e, false, id, &mut locals);
         return Some(id);
     }
     return None;
 }
 
-fn statement_to_blocks(blocks: &mut Vec<IRBlock>, stm: Statement, id: &mut IRID) {
+fn statement_to_blocks(blocks: &mut Vec<IRBlock>, stm: Statement, id: &mut IRID, locals: &mut HashMap<InternedString, IRID>) {
     match stm {
         Statement::Expression(e) => {
-            expr_to_blocks(blocks, e, false, id);
+            expr_to_blocks(blocks, e, false, id, locals);
         },
         Statement::Return(r, e) => {
             if let Some(e) = e {
                 let range = r.merge(&e.range());
-                let id = expr_to_blocks(blocks, e, false, id);
+                let id = expr_to_blocks(blocks, e, false, id, locals);
                 insert(blocks, IRInstruction::ReturnValue { id, token_id: range });
             } else {
                 insert(blocks, IRInstruction::Return { token_id: r });
@@ -128,7 +154,7 @@ fn statement_to_blocks(blocks: &mut Vec<IRBlock>, stm: Statement, id: &mut IRID)
 
 /// Converts an expression to blocks in a function, returning the IRID of the value.
 /// If lvalue is true, instead returns a pointer to the place to store a value.
-fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &mut IRID) -> IRID {
+fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &mut IRID, locals: &mut HashMap<InternedString, IRID>) -> IRID {
     let er = e.range();
     match e {
         Expression::Unary { e, op, op_range } => {
@@ -137,10 +163,10 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
                     panic!("Only indexing and dereferencing is an allowed operation for lvalues");
                 }
                 // Since an lvalue should be a pointer, just omit the deref operation. 
-                expr_to_blocks(blocks, *e, lvalue, id)
+                expr_to_blocks(blocks, *e, lvalue, id, locals)
             } else {
                 let i = id.next();
-                let inp = expr_to_blocks(blocks, *e, lvalue, id);
+                let inp = expr_to_blocks(blocks, *e, lvalue, id, locals);
                 insert(blocks, IRInstruction::UnOp {
                     inp,
                     op,
@@ -153,8 +179,8 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
             match op {
                 BinOp::Index => {
                     let i = id.next();
-                    let lhs = expr_to_blocks(blocks, *lhs, true, id);
-                    let rhs = expr_to_blocks(blocks, *rhs, false, id);
+                    let lhs = expr_to_blocks(blocks, *lhs, true, id, locals);
+                    let rhs = expr_to_blocks(blocks, *rhs, false, id, locals);
                     insert(blocks, IRInstruction::BinOp {
                         lhs,
                         op,
@@ -175,8 +201,8 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
                     }
                     let i = id.next();
                     insert(blocks, IRInstruction::Unit { out: i });
-                    let lhs = expr_to_blocks(blocks, *lhs, true, id);
-                    let rhs = expr_to_blocks(blocks, *rhs, false, id);
+                    let lhs = expr_to_blocks(blocks, *lhs, true, id, locals);
+                    let rhs = expr_to_blocks(blocks, *rhs, false, id, locals);
                     insert(blocks, IRInstruction::Store { ptr: lhs, value: rhs });
                     i
                 },
@@ -185,8 +211,8 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
                         panic!("Only indexing and dereferencing is an allowed operation for lvalues");
                     }
                     let i = id.next();
-                    let lhs = expr_to_blocks(blocks,*lhs, lvalue, id);
-                    let rhs = expr_to_blocks(blocks,*rhs, lvalue, id);
+                    let lhs = expr_to_blocks(blocks,*lhs, lvalue, id, locals);
+                    let rhs = expr_to_blocks(blocks,*rhs, lvalue, id, locals);
                     insert(blocks, IRInstruction::BinOp {
                         lhs,
                         op,
@@ -199,7 +225,7 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
         },
         Expression::Property { e, name, name_token } => {
             let i = id.next();
-            let base = expr_to_blocks(blocks,*e, true, id);
+            let base = expr_to_blocks(blocks,*e, true, id, locals);
             insert(blocks, IRInstruction::Property {
                 inp: base,
                 name: (name, name_token),
@@ -214,19 +240,24 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
             }
         },
         Expression::Item(item_path) => {
-            let i = id.next();
-            let r = item_path.range();
-            insert(blocks, IRInstruction::Path { path: item_path, tokens: r, id: i, lvalue });
-            i
+            if item_path.global == false && item_path.segments.len() == 1 && item_path.segments[0].generic_args.len() == 0 &&
+                let Some(id) = locals.get(&item_path.segments[0].ident) {
+                *id
+            } else {
+                let i = id.next();
+                let r = item_path.range();
+                insert(blocks, IRInstruction::Path { path: item_path, tokens: r, id: i, lvalue });
+                i
+            }
         },
-        Expression::Group(expression) => expr_to_blocks(blocks, *expression, lvalue, id),
+        Expression::Group(expression) => expr_to_blocks(blocks, *expression, lvalue, id, locals),
         Expression::IntLiteral(_, token_range) => todo!(),
         Expression::FloatLiteral(_, token_range) => todo!(),
         Expression::Call(item_path, expressions) => todo!(),
         Expression::If { condition, then, other } => todo!(),
         Expression::Loop { block } => todo!(),
         // TODO replace unwrap with error reporting
-        Expression::Unsafe(block) => block_to_ir(blocks, *block, id).unwrap(),
+        Expression::Unsafe(block) => block_to_ir(blocks, *block, id, todo!()).unwrap(),
     }
     
     

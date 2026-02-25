@@ -1,7 +1,7 @@
 
 
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, mem::replace, rc::Rc};
 
 
 use crate::internal::{Builtin, Mutability, ShaderType, StringTable, Visibility, ast::ItemPathSegment};
@@ -13,19 +13,16 @@ use super::{ast::{self, BinOp, GenericArgDefinition, GenericsConstraint, ItemPat
 pub mod astconvert;
 
 
-/// Resolved item paths are global paths where generics information is already resolved and included
-/// in the path via name mangling. The path as a whole is then joined with "::" and forms the resolved path.
-pub struct ResolvedItemPath(pub InternedString);
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolID(pub usize);
 
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SymbolTable {
     map: HashMap<InternedString, usize>,
+    mapr: HashMap<usize, InternedString>,
     items: Vec<(Visibility, GlobalItem)>,
 }
 
@@ -34,6 +31,7 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self {
             map: HashMap::with_capacity(1024),
+            mapr: HashMap::with_capacity(1024),
             items: Vec::with_capacity(1024),
         }
     }
@@ -42,43 +40,50 @@ impl SymbolTable {
     pub fn new_prelude(strings: &StringTable) -> Self {
         let mut m = Self {
             map: HashMap::with_capacity(1024),
+            mapr: HashMap::with_capacity(1024),
             items: Vec::with_capacity(1024),
         };
         
         let c = strings.insert_get("core");
         
+        let dummy_range = TokenRange { file: 0, range: 0..0 };
         
         let globalInvocationID = strings.insert_get("globalInvocationID");
         m.insert(globalInvocationID, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
             ItemPathSegment {
                 ident: c,
-                ident_token: TokenRange { file: 0, range: 0..0 },
+                ident_token: dummy_range.clone(),
                 generic_args: vec![]
             },
             ItemPathSegment {
                 ident: globalInvocationID,
-                ident_token: TokenRange { file: 0, range: 0..0 },
+                ident_token: dummy_range.clone(),
                 generic_args: vec![]
             }
-        ], global: true } })).unwrap();
+        ], global: true }, span: dummy_range.clone() })).unwrap();
         
         let tu32 = strings.insert_get("u32");
         m.insert(tu32, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
             ItemPathSegment {
                 ident: c,
-                ident_token: TokenRange { file: 0, range: 0..0 },
+                ident_token: dummy_range.clone(),
                 generic_args: vec![]
             },
             ItemPathSegment {
                 ident: tu32,
-                ident_token: TokenRange { file: 0, range: 0..0 },
+                ident_token: dummy_range.clone(),
                 generic_args: vec![]
             }
-        ], global: true } })).unwrap();
+        ], global: true }, span: dummy_range.clone() })).unwrap();
         
         
         
         return m;
+    }
+    
+    
+    pub fn insert_module(&mut self, other: SymbolTable, name: InternedString) {
+        self.insert(name, (Visibility::Priv, GlobalItem::Module(other))).unwrap();
     }
     
     pub fn lookup(&self, path: &InternedString) -> Option<&(Visibility, GlobalItem)> {
@@ -90,7 +95,14 @@ impl SymbolTable {
     }
     
     pub fn get(&self, id: SymbolID) -> &(Visibility, GlobalItem) {
-        &self.items[id.0]
+        match &self.items[id.0].1 {
+            GlobalItem::ResolvedImport { path, id } => self.get(*id),
+            _ => &self.items[id.0]
+        }
+    }
+    
+    pub fn get_name(&self, id: SymbolID) -> InternedString {
+        *self.mapr.get(&id.0).unwrap()
     }
     
     pub fn insert(&mut self, path: InternedString, item: (Visibility, GlobalItem)) -> Result<(), ()> {
@@ -100,6 +112,7 @@ impl SymbolTable {
         let i = self.items.len();
         self.items.push(item);
         self.map.insert(path, i);
+        self.mapr.insert(i, path);
         return Ok(());
     }
     
@@ -110,6 +123,7 @@ impl SymbolTable {
         let i = self.items.len();
         self.items.push((vis, GlobalItem::Placeholder));
         self.map.insert(path, i);
+        self.mapr.insert(i, path);
         return Ok(SymbolID(i));
     }
     
@@ -159,16 +173,185 @@ impl SymbolTable {
         todo!()
     }
     
-    pub fn resolve_paths(&mut self) {
+    
+    /// Should only be called on the top level symbol table.
+    /// This merges all child symbol tables recursively, adjusts the paths of items, and resolves all imports.
+    /// This can be called a second time after adding more modules to the symbol table again though.
+    /// Doesn't work with adding resolved modules though, since symbol ids between items aren't touched even though they change.
+    pub fn resolve_paths(&mut self, strings: &StringTable) {
+        let mut modules = vec![];
+        
+        fn find_modules(modules: &mut Vec<(InternedString, SymbolTable)>, table: &mut SymbolTable, prefix: InternedString, strings: &StringTable) {
+            for (id, i) in table.items.iter_mut().enumerate() {
+                match &mut i.1 {
+                    GlobalItem::Module(symbol_table) => {
+                        let name = *table.mapr.get(&id).unwrap();
+                        let prefix = strings.insert_get(&(strings.lookup(prefix) + "::" + &strings.lookup(name)));
+                        find_modules(modules, symbol_table, prefix, strings);
+                        let s = replace(&mut i.1, GlobalItem::RemovedModule);
+                        modules.push((prefix, match s {
+                            GlobalItem::Module(s) => s,
+                            _ => {unreachable!()}
+                        }));
+                    },
+                    _ => {}
+                }
+            }
+        }
+        
+        let double_colon = strings.insert_get("::");
+        let empty = strings.insert_get("");
+        
+        find_modules(&mut modules, self, empty, strings);
+        
+        // TODO resolve all outstanding symbols, generating errors for symbols still not found
         
         
         
-        todo!()
+        
+        for m in modules {
+            self.items.reserve(m.1.items.len());
+            self.map.reserve(m.1.items.len());
+            self.mapr.reserve(m.1.items.len());
+            for (id, mut i) in m.1.items.into_iter().enumerate() {
+                let new_path = strings.insert_get(&(strings.lookup(m.0) + "::" + &strings.lookup(m.1.mapr[&id])));
+                self.insert(new_path, i).unwrap();
+            }
+        }
+        
+        
+        for (id, i) in self.items.iter_mut().enumerate() {
+            match i {
+                (v, GlobalItem::Import { path , span}) => {
+                    // for now the only imports are the prelude into core, which are global paths
+                    if path.global {
+                        let p = path.interned(strings, double_colon);
+                        // TODO visibility calculations
+                        if let Some(id) = self.map.get(&p) {
+                            let ri = GlobalItem::ResolvedImport { path: path.clone(), id: SymbolID(*id) };
+                            i.1 = ri;
+                        } else {
+                            panic!("Could not find import: {}", strings.lookup(p));
+                        }
+                    } else {
+                        todo!()
+                    }
+                    
+                    // TODO support paths from local modules and from imported submodules, that is use foo::bar and then use bar::baz
+                    
+                    
+                    
+                },
+                _ => {
+                    //println!("symbol path: {}", strings.lookup(self.mapr[&id]));
+                }
+            }
+        }
+        
+        fn resolve_type(table: &SymbolTable, t: &mut Type, m: InternedString, strings: &StringTable) {
+            match t {
+                Type::Unresolved(item_path) => {
+                    let mut sym = None;
+                    if ! item_path.global {
+                        let lp = item_path.segments[0].ident;
+                        let gp = strings.insert_get(&(strings.lookup(m) + "::" + &strings.lookup(lp)));
+                        if table.lookup_id(&gp).is_some() {
+                            if let Some(s) = table.lookup_id(&item_path.interned(strings, m)) {
+                                sym = Some(s);
+                            } else {
+                                panic!()
+                            }
+                        }
+                    }
+                    if sym.is_none() {
+                        item_path.global = true;
+                        if let Some(s) = table.lookup_id(&item_path.interned(strings, m)) {
+                            sym = Some(s);
+                        } else {
+                            panic!()
+                        } 
+                    }
+                    let s = sym.unwrap();
+                    match &table.get(s).1 {
+                        GlobalItem::Type(ty) => {
+                            *t = ty.clone();
+                            
+                        }
+                        _ => {
+                            todo!()
+                        }
+                    }
+                },
+                Type::Resolved(symbol_id) => {},
+                Type::Primitive(primitive) => {},
+                Type::Vector { components, ty } => {},
+                Type::Matrix { rows, cols, ty } => {},
+                Type::Array { length, ty } => todo!(),
+                Type::UnresolvedArray { length, ty } => todo!(),
+                Type::RuntimeArray { ty } => todo!(),
+                Type::Pointer { class, ty, mutability } => resolve_type(table, &mut*ty, m, strings),
+                Type::Reference { class, ty, mutability } => resolve_type(table, &mut*ty, m, strings),
+            }
+        }
+        
+        fn resolve_item(table: &SymbolTable, p: &mut ItemPath, m: InternedString, strings: &StringTable) -> SymbolID {
+            let mut sym = None;
+            if ! p.global {
+                let lp = p.segments[0].ident;
+                let gp = strings.insert_get(&(strings.lookup(m) + "::" + &strings.lookup(lp)));
+                if table.lookup_id(&gp).is_some() {
+                    if let Some(s) = table.lookup_id(&p.interned(strings, m)) {
+                        sym = Some(s);
+                    } else {
+                        panic!()
+                    }
+                }
+            }
+            if sym.is_none() {
+                p.global = true;
+                if let Some(s) = table.lookup_id(&p.interned(strings, m)) {
+                    sym = Some(s);
+                } else {
+                    panic!()
+                } 
+            }
+            return sym.unwrap();
+        }
+        
+        
+        for (id, i) in self.items.iter().enumerate() {
+            match i {
+                (v, GlobalItem::Function(f)) => {
+                    let m = self.mapr[&id].base(strings);
+                    let mut blocks = f.blocks.borrow_mut();
+                    // TODO look up types as well, to cover the u32 in the pointers
+                    for b in blocks.iter_mut() {
+                        for inst in &mut b.instructions {
+                            match inst {
+                                IRInstruction::Path { path, tokens, id, lvalue } => {
+                                    let pid  = resolve_item(self, path, m, strings);
+                                    *inst = IRInstruction::ResolvedPath { path: pid, tokens: tokens.clone(), id: *id, lvalue: *lvalue  };
+                                },
+                                IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
+                                    if let Some(ty) = ty {
+                                        resolve_type(self, ty, m, strings);
+                                    }
+                                },
+                                _ => {}
+                            }
+                        }
+                    }
+                    // TODO load constants into function variables for lvalue positions
+                },
+                _ => {}
+            }
+        }
+        
     }
     
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GlobalItem {
     /// Generic struct. Should be resolved after type checking and can then be ignored.
     StructTemplate {
@@ -204,10 +387,9 @@ pub enum GlobalItem {
     Function(Function),
     Import {
         path: ItemPath,
+        span: TokenRange,
     },
-    // TODO import from another symbol table, to make symbol tables for packages more disposable for an LSP.
     ResolvedImport {
-        public: bool,
         path: ItemPath,
         id: SymbolID,
     },
@@ -215,16 +397,21 @@ pub enum GlobalItem {
     Placeholder,
     Type(Type),
     Module(SymbolTable),
+    RemovedModule,
+    Removed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub attrs: Vec<Attribute>,
     pub ident_token: TokenRange,
     pub shader_type: ShaderType,
-    pub params: Vec<(InternedString, TokenRange, Uniformity, Type)>,
+    //pub params: Vec<(InternedString, TokenRange, Uniformity, Type)>,
+    pub num_params: usize,
     pub ret: (Type, Uniformity),
     pub blocks: RefCell<Vec<IRBlock>>,
+    pub next_id: RefCell<IRID>,
+    pub types: RefCell<HashMap<IRID, Type>>,
 }
 
 
@@ -240,7 +427,7 @@ pub enum Type {
     },
     Matrix {
         rows: u8,
-        cold: u8,
+        cols: u8,
         ty: Primitive,
     },
     Array {
@@ -263,10 +450,10 @@ pub enum Type {
         class: StorageClass,
         ty: Box<Type>,
         mutability: Mutability,
-    }
+    },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Primitive {
     U8, U16, U32, U64,
     I8, I16, I32, I64,
@@ -293,7 +480,7 @@ impl IRID {
 pub struct BlockID(pub usize);
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// A small SSA instruction set.
 pub enum IRInstruction {
     /// An unresolved path. Should be eliminated by path canonicalization.
@@ -315,6 +502,7 @@ pub enum IRInstruction {
         path: SymbolID,
         tokens: TokenRange,
         id: IRID,
+        lvalue: bool,
     },
     
     Local {
@@ -325,7 +513,8 @@ pub enum IRInstruction {
         id: IRID,
         /// None for a type to be inferred. Technically the type is a pointer to the supplied type with the function storage class, but that is implied.
         ty: Option<Type>,
-        uni: Uniformity
+        uni: Uniformity,
+        mutable: Mutability,
     },
     
     // TODO trait method invocation
@@ -447,7 +636,7 @@ pub enum IRInstruction {
     
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IRBlock {
     pub instructions: Vec<IRInstruction>,
 }

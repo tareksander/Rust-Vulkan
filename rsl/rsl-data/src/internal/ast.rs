@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::Range};
 
-use crate::internal::{ShaderType, tokens::Token};
+use crate::internal::{ShaderType, StringTable, tokens::Token};
 
 use super::{Attribute, InternedString, Mutability, StorageClass, Uniformity, Visibility};
 
@@ -48,6 +48,27 @@ pub struct ItemPath {
     pub global: bool,
 }
 
+impl ItemPath {
+    pub fn interned(&self, strings: &StringTable, prefix: InternedString) -> InternedString {
+        let prefix = if self.global {
+            "".to_string()
+        } else {
+            strings.lookup(prefix)
+        };
+        
+        let mut v = Vec::with_capacity(self.segments.len() + 1);
+        v.push(prefix);
+        for s in &self.segments {
+            if s.generic_args.len() != 0 {
+                todo!("Path interning for generics")
+            }
+            v.push(strings.lookup(s.ident));
+        }
+        return strings.insert_get(&v.join("::"));
+    }
+    
+}
+
 impl SourceRange for ItemPath {
     fn range(&self) -> TokenRange {
         self.segments[1..].iter().fold(self.segments.first().unwrap().range(), |r, s| r.merge(&s.range()))
@@ -84,7 +105,7 @@ impl SourceRange for GenericArg {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GenericArgDefinition {
     Type(InternedString, TokenRange),
     Expression(InternedString, TokenRange),
@@ -325,7 +346,7 @@ pub struct StructField {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GenericsConstraint {
     Implements {
         var: (InternedString, TokenRange),

@@ -8,6 +8,9 @@ rsl-data = { path = "../rsl-data" }
 bitflags.workspace = true
 hashbrown.workspace = true
 ariadne.workspace = true
+ena.workspace = true
+
+
 
 
 [dev-dependencies]

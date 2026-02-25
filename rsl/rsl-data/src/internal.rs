@@ -83,6 +83,12 @@ impl InternedString {
     pub fn get(&self, strings: &StringTable) -> String {
         strings.lookup(*self)
     }
+    
+    /// Cuts off the last segment of an item path.
+    pub fn base(&self, strings: &StringTable) -> InternedString {
+        let s = strings.lookup(*self);
+        return strings.insert_get(s.rsplit_once("::").unwrap().0);
+    }
 }
 
 

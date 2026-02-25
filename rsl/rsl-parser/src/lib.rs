@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn module() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = black_box(String::from("#[compute] fn test(a: dispatch *const u32, b: dispatch *const u32, c: dispatch *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }"));
+        let code = black_box(String::from("#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }"));
         let code = &code;
         let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
