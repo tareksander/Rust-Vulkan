@@ -1,0 +1,18 @@
+[package]
+name = "rsl-vk-sys"
+version = "0.1.0"
+edition = "2024"
+
+
+
+
+
+[dependencies]
+
+
+
+
+[build-dependencies]
+xml.workspace = true
+
+
