@@ -1,8 +1,7 @@
-use std::{collections::HashMap, fmt::Pointer};
+use std::{collections::HashMap, fmt::Pointer, usize};
 
 use bitflags::bitflags;
 use rsl_data::internal::{CompilerData, InternedString, Mutability, StorageClass, StringTable, ir::{Function, GlobalItem, IRBlock, IRID, Primitive, SymbolID, SymbolTable, Type}};
-use ena::unify::{InPlaceUnificationTable, NoError, UnifyKey, UnifyValue};
 
 
 #[derive(Debug, Clone)]
@@ -13,11 +12,15 @@ enum TCType {
         sym: SymbolID,
         params: Vec<Type>,
     },
+    Number,
     Primitive(Primitive),
     Vector {
         components: Option<u8>,
         ty: Box<TCType>,
     },
+    Int,
+    UInt,
+    SInt,
     /// Must resolve to a vector or a struct, used for struct property vs vec swizzle differentiation
     VecOrStruct,
     /// Anything indexable really, but there are no operator overload traits yet, so pointers, matrices and arrays.
@@ -50,216 +53,196 @@ enum TCType {
 }
 
 impl TCType {
-    fn canonicalize(&self, data: &mut TCData) -> Self {
+    
+    fn canonicalize(&self, table: &Vec<TCType>) -> TCType {
         match self {
-            TCType::Vector { components, ty } => TCType::Vector { components: *components, ty: Box::new(ty.canonicalize(data)) },
+            TCType::Struct(symbol_id) => todo!(),
             TCType::Function { sym, params } => todo!(),
+            TCType::Number => self.clone(),
+            TCType::Primitive(primitive) => self.clone(),
+            TCType::Vector { components, ty } => TCType::Vector { components: *components, ty: Box::new(ty.canonicalize(table)) },
+            TCType::Int => todo!(),
+            TCType::UInt => todo!(),
+            TCType::SInt => todo!(),
+            TCType::VecOrStruct => todo!(),
+            TCType::Indexable => todo!(),
             TCType::Matrix { rows, cols, ty } => todo!(),
             TCType::Array { length, ty } => todo!(),
             TCType::RuntimeArray { ty } => todo!(),
+            TCType::Pointer { class, ty, mutability } => TCType::Pointer { class: *class, ty: Box::new(ty.canonicalize(table)), mutability: *mutability },
             TCType::Reference { class, ty, mutability } => todo!(),
-            TCType::Pointer { class, ty, mutability } => TCType::Pointer { class: *class, ty: Box::new(ty.canonicalize(data)), mutability: *mutability },
-            TCType::TypeVariable(type_id) => data.unify.probe_value(*type_id).canonicalize(data),
-            _ => self.clone()
+            TCType::Unknown => self.clone(),
+            TCType::TypeVariable(type_id) => table[type_id.0 as usize].canonicalize(table),
         }
     }
     
-    fn unify(data: &mut TCData, v1: &Self, v2: &Self) -> Result<TCType, ()> {
-        match (v1, v2) {
-            (TCType::TypeVariable(v1), TCType::TypeVariable(v2)) => {
-                let vt1 = data.unify.probe_value(*v1);
-                let vt2 = data.unify.probe_value(*v2);
-                Self::unify(data, &vt1, &vt2).unwrap();
-                data.unify.unify_var_var(*v1, *v2).unwrap();
-                
-                
-                todo!()
-            }
-            (TCType::TypeVariable(v), o) => {
-                let vt = data.unify.probe_value(*v);
-                Self::unify(data, &vt, o).unwrap();
-                data.unify.unify_var_value(*v, o.clone()).unwrap();
-                // Since we may want to apply and propagate more constraints, the variable still has precedence
-                return Ok(TCType::TypeVariable(*v));
+    fn to_ir_type(&self) -> Type {
+        match self {
+            TCType::Struct(symbol_id) => todo!(),
+            TCType::Function { sym, params } => todo!(),
+            TCType::Number => todo!(),
+            TCType::Primitive(primitive) => Type::Primitive(*primitive),
+            TCType::Vector { components, ty } => {
+                match &**ty {
+                    TCType::Primitive(primitive) => Type::Vector { components: components.unwrap(), ty: *primitive },
+                    _ => todo!()
+                }
             },
-            (o, TCType::TypeVariable(v)) => {
-                let vt = data.unify.probe_value(*v);
-                Self::unify(data, &vt, o).unwrap();
-                data.unify.unify_var_value(*v, o.clone()).unwrap();
-                return Ok(TCType::TypeVariable(*v));
-            },
+            TCType::Int => todo!(),
+            TCType::UInt => todo!(),
+            TCType::SInt => todo!(),
+            TCType::VecOrStruct => todo!(),
+            TCType::Indexable => todo!(),
+            TCType::Matrix { rows, cols, ty } => todo!(),
+            TCType::Array { length, ty } => todo!(),
+            TCType::RuntimeArray { ty } => todo!(),
+            // TODO mutability
+            TCType::Pointer { class, ty, mutability } => Type::Pointer { class: *class, ty: Box::new(ty.to_ir_type()), mutability: Mutability::Mutable },
+            TCType::Reference { class, ty, mutability } => todo!(),
+            TCType::Unknown => Type::Primitive(Primitive::Unit),
+            TCType::TypeVariable(type_id) => todo!(),
+        }
+    }
+    
+    fn unify_var_val(data: &mut TCData, var: TypeID, val: &TCType) -> Result<TCType, ()> {
+        let t = data.type_vars[var.0 as usize].clone();
+        data.type_vars[var.0 as usize] = Self::unify_val_val(data, &t, val)?;
+        return Ok(TCType::TypeVariable(var));
+    }
+    
+    fn unify_var_var(data: &mut TCData, v1: TypeID, v2: TypeID) -> Result<TCType, ()> {
+        let t1 = data.type_vars[v1.0 as usize].clone();
+        let t2 = data.type_vars[v2.0 as usize].clone();
+        let t = Self::unify_val_val(data, &t1, &t2)?;
+        data.type_vars[v1.0 as usize] = t.clone();
+        data.type_vars[v2.0 as usize] = TCType::TypeVariable(v1);
+        return Ok(TCType::TypeVariable(v1));
+    }
+    
+    fn unify_val_val(data: &mut TCData, v1: &TCType, v2: &TCType) -> Result<TCType, ()> {
+        Ok(match (v1, v2) {
+            (TCType::TypeVariable(v1), TCType::TypeVariable(v2)) => Self::unify_var_var(data, *v1, *v2)?,
             
-            // Unconstrained types trivially unify
-            (TCType::Unknown, TCType::Unknown) => Ok(TCType::Unknown),
             
-            // If one value is unknown, the defined one has precedence
-            (TCType::Unknown, a) => Ok(a.clone()),
-            (a, TCType::Unknown) => Ok(a.clone()),
+            (TCType::TypeVariable(v), o) => Self::unify_var_val(data, *v, o)?,
+            (o, TCType::TypeVariable(v)) => Self::unify_var_val(data, *v, o)?,
             
-            (TCType::VecOrStruct, TCType::Vector { components, ty }) => Ok(v2.clone()),
-            (TCType::Vector { components, ty }, TCType::VecOrStruct) => Ok(v1.clone()),
-            
-            (TCType::VecOrStruct, TCType::Struct(_)) => Ok(v2.clone()),
-            (TCType::Struct(_), TCType::VecOrStruct) => Ok(v1.clone()),
+            (TCType::Unknown, o) => o.clone(),
+            (o, TCType::Unknown) => o.clone(),
             
             
-            (TCType::Indexable, TCType::Pointer { class, ty, mutability }) => Ok(v2.clone()),
-            (TCType::Pointer { class, ty, mutability }, TCType::Indexable) => Ok(v1.clone()),
+            (TCType::VecOrStruct, TCType::Vector { components, ty }) => v2.clone(),
+            (TCType::Vector { components, ty }, TCType::VecOrStruct) => Self::unify_val_val(data, v2, v1)?,
             
+            (TCType::Indexable, TCType::Pointer { class, ty, mutability }) => v2.clone(),
+            (TCType::Pointer { class, ty, mutability }, TCType::Indexable) => Self::unify_val_val(data, v2, v1)?,
             
             (TCType::Pointer { class: c1, ty: ty1, mutability: m1 }, TCType::Pointer { class: c2, ty: ty2, mutability: m2 }) => {
                 let mut c = *c1;
-                if *c1 != StorageClass::Logical && *c2 != StorageClass::Logical && *c1 != *c2 {
-                    panic!()
+                'a: {
+                    if c1 != c2 {
+                        let one_logical = *c1 == StorageClass::Logical || *c2 == StorageClass::Logical;
+                        if one_logical {
+                            if *c1 != StorageClass::Logical {
+                                c = *c1;
+                            } else {
+                                c = *c2;
+                            }
+                            break 'a;
+                        } 
+                        panic!("Pointer storage classes don't match");
+                        return Err(());
+                    }
                 }
-                if c == StorageClass::Logical {
-                    c = *c2;
-                }
-                let t = Self::unify(data, ty1, ty2).unwrap();
-                if *m1 != *m2 {
-                    panic!("Incompatible pointer mutability")
-                }
-                return Ok(TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 });
+                // TODO mutability
+                let t = Self::unify_val_val(data, ty1, ty2).unwrap();
+                TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 }
             }
             
             
-            _ => {todo!()}
-        }
-    }
-    
-}
-
-impl UnifyValue for TCType {
-    type Error = NoError;
-
-    fn unify_values(v1: &Self, v2: &Self) -> Result<Self, Self::Error> {
-        
-        match (v1, v2) {
-            // Unconstrained types trivially unify
-            (TCType::Unknown, TCType::Unknown) => Ok(TCType::Unknown),
-            
-            // If one value is unknown, the defined one has precedence
-            (TCType::Unknown, a) => Ok(a.clone()),
-            (a, TCType::Unknown) => Ok(a.clone()),
-            
-            (TCType::VecOrStruct, TCType::Vector { components, ty }) => Ok(v2.clone()),
-            (TCType::Vector { components, ty }, TCType::VecOrStruct) => Ok(v1.clone()),
-            
-            (TCType::VecOrStruct, TCType::Struct(_)) => Ok(v2.clone()),
-            (TCType::Struct(_), TCType::VecOrStruct) => Ok(v1.clone()),
-            
-            
-            // todo: indexable to concrete type.
-            (TCType::Indexable, TCType::Pointer { class, ty, mutability }) => Ok(v2.clone()),
-            (TCType::Pointer { class, ty, mutability }, TCType::Indexable) => Ok(v1.clone()),
-            
-            
-            
-            (TCType::Pointer { class: c1, ty: ty1, mutability: m1 }, TCType::Pointer { class: c2, ty: ty2, mutability: m2 }) => {
-                let mut c = *c1;
-                if *c1 != StorageClass::Logical && *c2 != StorageClass::Logical && *c1 != *c2 {
-                    panic!()
+            (TCType::Primitive(p1), TCType::Primitive(p2)) => {
+                if *p1 == *p2 {
+                    v1.clone()
+                } else {
+                    return Err(());
                 }
-                if c == StorageClass::Logical {
-                    c = *c2;
-                }
-                let t = Self::unify_values(&**ty1, &**ty2)?;
-                if *m1 != *m2 {
-                    panic!()
-                }
-                return Ok(TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 });
             }
             
-            // since the variable should have been unified with the other side already, just return the variable.
-            (TCType::TypeVariable(v), _) => Ok(TCType::TypeVariable(*v)),
-            (_, TCType::TypeVariable(v)) => Ok(TCType::TypeVariable(*v)),
+            
+            (TCType::Number, TCType::Number) => v1.clone(),
+            (TCType::Int, TCType::Int) => v1.clone(),
+            (TCType::SInt, TCType::SInt) => v1.clone(),
+            (TCType::UInt, TCType::UInt) => v1.clone(),
+            
+            
+            (TCType::Number, TCType::Primitive(p)) => {
+                if p.is_number() {
+                    v2.clone()
+                } else {
+                    return Err(());
+                }
+            },
+            (TCType::Primitive(p), TCType::Number) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Int, TCType::Primitive(p)) => {
+                if p.is_int() {
+                    v2.clone()
+                } else {
+                    return Err(());
+                }
+            },
+            (TCType::Primitive(p), TCType::Int) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::UInt, TCType::Primitive(p)) => {
+                if p.is_uint() {
+                    v2.clone()
+                } else {
+                    return Err(());
+                }
+            },
+            (TCType::Primitive(p), TCType::UInt) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::SInt, TCType::Primitive(p)) => {
+                if p.is_sint() {
+                    v2.clone()
+                } else {
+                    return Err(());
+                }
+            },
+            (TCType::Primitive(p), TCType::SInt) => Self::unify_val_val(data, v2, v1)?,
+            
+            
+            
+            (TCType::Number, TCType::Int) => v2.clone(),
+            (TCType::Int, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Number, TCType::UInt) => v2.clone(),
+            (TCType::UInt, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Number, TCType::SInt) => v2.clone(),
+            (TCType::SInt, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Int, TCType::UInt) => v2.clone(),
+            (TCType::UInt, TCType::Int) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Int, TCType::SInt) => v2.clone(),
+            (TCType::SInt, TCType::Int) => Self::unify_val_val(data, v2, v1)?,
             
             
             
             
-            _ => panic!()
-        }
+            _ => {
+                todo!("Unify of {:?} and {:?}", v1, v2);
+            }
+        })
     }
+    
 }
-
-
-
-
-
-bitflags! {
-    
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct LengthSet : u8 {
-        const One = 1 << 1;
-        const Two = 1 << 2;
-        const Three = 1 << 3;
-        const Four = 1 << 4;
-    }
-    
-    
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct PrimitiveSet : u16 {
-        const U8 = 1 << 0;
-        const U16 = 1 << 1;
-        const U32 = 1 << 2;
-        const U64 = 1 << 3;
-        const I8 = 1 << 4;
-        const I16 = 1 << 5;
-        const I32 = 1 << 6;
-        const I64 = 1 << 7;
-        const F16 = 1 << 8;
-        const F32 = 1 << 9;
-        const F64 = 1 << 10;
-        const Bool = 1 << 11;
-        const Unit = 1 << 12;
-    }
-    
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct UniformitySet :u8 {
-        const Dispatch = 1 << 0;
-        const Workgroup = 1 << 1;
-        const Subgroup = 1 << 2;
-        const Invocation = 1 << 3;
-    }
-    
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct MutabilitySet :u8 {
-        const Immutable = 1 << 0;
-        const Mutable = 1 << 1;
-    }
-    
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct StorageClassSet :u8 {
-        const Function = 1 << 0;
-        const Private = 1 << 1;
-        const Workgroup = 1 << 2;
-        const Storage = 1 << 3;
-        const PhysicalStorage = 1 << 4;
-        const Logical = 1 << 5;
-    }
-}
-
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct TypeID(u32);
 
-
-impl UnifyKey for TypeID {
-    type Value = TCType;
-
-    fn index(&self) -> u32 {
-        self.0
-    }
-
-    fn from_index(u: u32) -> Self {
-        Self(u)
-    }
-
-    fn tag() -> &'static str {
-        "TypeID"
-    }
-}
 
 
 
@@ -269,6 +252,7 @@ enum TypeConstraint {
     Float(TypeID),
     Int(TypeID),
     Sint(TypeID),
+    Uint(TypeID),
     Primitive(TypeID),
     Generic(TypeID, SymbolID, Vec<TypeID>),
     Concrete(TypeID, SymbolID),
@@ -282,6 +266,7 @@ enum TypeConstraint {
     Same(TypeID, TypeID),
     PointerOf(TypeID, TypeID),
     Pointer(TypeID),
+    SamePointerMeta(TypeID, TypeID),
     ImmRefOf(TypeID, TypeID),
     MutRefOf(TypeID, TypeID),
     VecOrStruct(TypeID),
@@ -293,19 +278,26 @@ enum TypeConstraint {
 struct TCData<'a> {
     symbols: &'a SymbolTable,
     strings: &'a StringTable,
-    unify: InPlaceUnificationTable<TypeID>,
     type_table: &'a mut HashMap<IRID, Type>,
-    unify_table: HashMap<TypeID, IRID>,
-    reverse_unify_table: HashMap<IRID, TypeID>,
+    type_vars: Vec<TCType>,
+    reverse_type_table: HashMap<TypeID, IRID>,
+    tc_type_table: HashMap<IRID, TypeID>,
     constraints: Vec<TypeConstraint>,
 }
 
 impl<'a> TCData<'a> {
     
     fn new_ir_type(&mut self, id: IRID, ty: TCType) -> TypeID {
-        let tid = self.unify.new_key(ty);
-        self.unify_table.insert(tid, id);
-        self.reverse_unify_table.insert(id, tid);
+        let tid = TypeID(self.type_vars.len() as u32);
+        self.type_vars.push(ty);
+        self.reverse_type_table.insert(tid, id);
+        self.tc_type_table.insert(*&id, tid);
+        tid
+    }
+    
+    fn new_free_type(&mut self, ty: TCType) -> TypeID {
+        let tid = TypeID(self.type_vars.len() as u32);
+        self.type_vars.push(ty);
         tid
     }
     
@@ -313,37 +305,126 @@ impl<'a> TCData<'a> {
 
 pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Function) {
     let ir = function.blocks.borrow_mut();
-    let unify = InPlaceUnificationTable::<TypeID>::new();
     let mut table = function.types.borrow_mut();
-    let unify_table = HashMap::with_capacity(function.next_id.borrow().0);
     let mut d = TCData {
         symbols,
         strings,
-        unify,
         type_table: &mut* table,
-        unify_table,
-        reverse_unify_table: HashMap::new(),
+        reverse_type_table: HashMap::new(),
+        tc_type_table: HashMap::new(),
+        type_vars: vec![],
         constraints: vec![],
     };
     for b in ir.iter() {
         type_check_block(&mut d, b, symbols);
     }
-    d.constraints.retain(|c| {
+    //println!("{:#?}", ir);
+    //println!("{:#?}", d.reverse_type_table);
+    let mut c = d.constraints;
+    d.constraints = vec![];
+    c.retain(|c| {
         match c {
             TypeConstraint::Same(a, b) => {
-                d.unify.unify_var_var(*a, *b).unwrap();
+                //println!("Unifying variables {}, and {}", a.0, b.0);
+                TCType::unify_var_var(&mut d, *a, *b).unwrap();
                 return false;
             },
-            TypeConstraint::Same(a, b) => {
-                d.unify.unify_var_var(*a, *b).unwrap();
+            TypeConstraint::Number(a) => {
+                TCType::unify_var_val(&mut d, *a, &TCType::Number).unwrap();
                 return false;
             },
+            TypeConstraint::Int(a) => {
+                TCType::unify_var_val(&mut d, *a, &TCType::Int).unwrap();
+                return false;
+            },
+            TypeConstraint::Sint(a) => {
+                TCType::unify_var_val(&mut d, *a, &TCType::SInt).unwrap();
+                return false;
+            },
+            TypeConstraint::Uint(a) => {
+                //println!("Unifying variable {} with UInt", a.0);
+                TCType::unify_var_val(&mut d, *a, &TCType::UInt).unwrap();
+                return false;
+            },
+            TypeConstraint::VecOrStruct(t) => {
+                //println!("Unifying variable {} with VecOrStruct", t.0);
+                TCType::unify_var_val(&mut d, *t, &TCType::VecOrStruct).unwrap();
+                return false;
+            },
+            TypeConstraint::MemberOf(st, mt, mn) => {
+                // TODO use canonical name, maybe resolve these later and until fixpoint
+                match d.type_vars[st.0 as usize].clone() {
+                    TCType::Vector { components, ty } => {
+                        TCType::unify_var_val(&mut d, *mt, &TCType::Pointer { class: StorageClass::Logical, ty, mutability: None }).unwrap();
+                    }
+                    _ => todo!(),
+                }
+                return false;
+            },
+            TypeConstraint::Pointer(t) => {
+                TCType::unify_var_val(&mut d, *t, &TCType::Pointer { class: StorageClass::Logical, ty: Box::new(TCType::Unknown), mutability: None }).unwrap();
+                return false;
+            },
+            TypeConstraint::PointerOf(p, v) => {
+                //println!("Solving PointerOf {} with type {}, IDs {}, and {}", p.0, v.0, d.reverse_type_table.get(p).cloned().unwrap_or(IRID(usize::MAX)).0, d.reverse_type_table.get(v).cloned().unwrap_or(IRID(usize::MAX)).0);
+                TCType::unify_var_val(&mut d, *p, &TCType::Pointer { class: StorageClass::Logical, ty: Box::new(TCType::TypeVariable(*v)), mutability: None }).unwrap();
+                return false;
+            },
+            TypeConstraint::SamePointerMeta(p1, p2) => {
+                let pt1 = match &d.type_vars[p1.0 as usize] {
+                    TCType::Pointer { class, ty, mutability } => (*class, *mutability),
+                    _ => unreachable!(),
+                };
+                let pt2 = match &d.type_vars[p2.0 as usize] {
+                    TCType::Pointer { class, ty, mutability } => (*class, *mutability),
+                    _ => unreachable!(),
+                };
+                if pt1.0 != StorageClass::Logical && pt2.0 != StorageClass::Logical && pt1.0 != pt2.0 {
+                    panic!("Incompatible pointer storage classes")
+                }
+                let c = if pt1.0 != StorageClass::Logical {
+                    pt1.0
+                } else {
+                    pt2.0
+                };
+                if pt1.1.is_some_and(|m1| pt2.1.is_some_and(|m2| m1 != m2)) {
+                    panic!("Incompatible pointer mutabilities")
+                }
+                let mut m = None;
+                if pt1.1.is_some() {
+                    m = pt1.1;
+                }
+                if pt2.1.is_some() {
+                    m = pt2.1;
+                }
+                match &mut d.type_vars[p1.0 as usize] {
+                    TCType::Pointer { class, ty, mutability } => {
+                        *class = c;
+                        *mutability = m;
+                    },
+                    _ => unreachable!(),
+                }
+                match &mut d.type_vars[p2.0 as usize] {
+                    TCType::Pointer { class, ty, mutability } => {
+                        *class = c;
+                        *mutability = m;
+                    },
+                    _ => unreachable!(),
+                }
+                return false;
+            }
             _ => {
                 return true;
             }
         }
     });
-    println!("{:#?}", d.constraints);
+    // println!("{:#?}", c);
+    // for (i, v) in d.type_vars.iter().enumerate() {
+    //     println!("Type var {} for SSA {}: {:#?}", i, d.reverse_type_table.get(&TypeID(i as u32)).cloned().unwrap_or(IRID(usize::MAX)).0, v);
+    // }
+    for (id, ty) in &d.tc_type_table {
+        d.type_table.insert(*id, d.type_vars[ty.0 as usize].canonicalize(&d.type_vars).to_ir_type());
+    }
     
 }
 
@@ -384,7 +465,9 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                     rsl_data::internal::ir::GlobalItem::Struct { attrs, ident_token } => todo!(),
                     rsl_data::internal::ir::GlobalItem::Trait { attrs, ident_token, args, constraints, types, functions } => todo!(),
                     rsl_data::internal::ir::GlobalItem::Static { attrs, ident_token, uni, ty } => {
-                        data.new_ir_type(*id, to_tctype(symbols, ty));
+                        //println!("{:#?}", to_tctype(symbols, ty));
+                        let tct = TCType::Pointer { class: StorageClass::Logical, ty: Box::new(to_tctype(symbols, ty)), mutability: None };
+                        data.new_ir_type(*id, tct);
                     },
                     rsl_data::internal::ir::GlobalItem::FunctionTemplate { args, constraints } => todo!(),
                     rsl_data::internal::ir::GlobalItem::Function(function) => todo!(),
@@ -401,15 +484,15 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
             },
             rsl_data::internal::ir::IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
                 if let Some(ty) = ty {
-                    data.new_ir_type(*id, to_tctype(symbols, ty));
+                    data.new_ir_type(*id, TCType::Pointer{ class: StorageClass::Logical, ty: Box::new(to_tctype(symbols, ty)), mutability: None});
                 } else {
-                    data.new_ir_type(*id, TCType::Unknown);
+                    data.new_ir_type(*id, TCType::Pointer{ class: StorageClass::Logical, ty: Box::new(TCType::Unknown), mutability: None});
                 }
             },
             rsl_data::internal::ir::IRInstruction::UnOp { inp, op, out, span } => todo!(),
             rsl_data::internal::ir::IRInstruction::BinOp { lhs, op, rhs, out, span } => {
-                let lhsty = data.reverse_unify_table[lhs];
-                let rhsty = data.reverse_unify_table[lhs];
+                let lhsty = data.tc_type_table[lhs];
+                let rhsty = data.tc_type_table[rhs];
                 let outty = data.new_ir_type(*out, TCType::Unknown);
                 match *op {
                     rsl_data::internal::ast::BinOp::Add => {
@@ -429,9 +512,11 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                     rsl_data::internal::ast::BinOp::LogOr => todo!(),
                     rsl_data::internal::ast::BinOp::BinXor => todo!(),
                     rsl_data::internal::ast::BinOp::Index => {
-                        data.constraints.push(TypeConstraint::Pointer(lhsty));
-                        data.constraints.push(TypeConstraint::Pointer(outty));
-                        data.constraints.push(TypeConstraint::Int(rhsty));
+                        let mt = data.new_free_type(TCType::Unknown);
+                        data.constraints.push(TypeConstraint::PointerOf(lhsty, mt));
+                        data.constraints.push(TypeConstraint::PointerOf(outty, mt));
+                        data.constraints.push(TypeConstraint::Uint(rhsty));
+                        data.constraints.push(TypeConstraint::SamePointerMeta(lhsty, outty));
                     },
                     rsl_data::internal::ast::BinOp::Assign => todo!(),
                     rsl_data::internal::ast::BinOp::Equals => todo!(),
@@ -447,17 +532,18 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
             },
             rsl_data::internal::ir::IRInstruction::Load { ptr, out } => {
                 let oty = data.new_ir_type(*out, TCType::Unknown);
-                data.constraints.push(TypeConstraint::PointerOf(data.reverse_unify_table[ptr], oty));
+                data.constraints.push(TypeConstraint::PointerOf(data.tc_type_table[ptr], oty));
             },
             rsl_data::internal::ir::IRInstruction::Store { ptr, value } => {
                 let vty = data.new_ir_type(*value, TCType::Unknown);
-                data.constraints.push(TypeConstraint::PointerOf(data.reverse_unify_table[ptr], vty));
+                data.constraints.push(TypeConstraint::PointerOf(data.tc_type_table[ptr], vty));
             },
             rsl_data::internal::ir::IRInstruction::Property { inp, name, out } => {
-                let ity = data.reverse_unify_table[inp];
-                data.constraints.push(TypeConstraint::VecOrStruct(ity));
+                let ity = data.tc_type_table[inp];
+                let pt = data.new_free_type(TCType::VecOrStruct);
+                data.constraints.push(TypeConstraint::PointerOf(ity, pt));
                 let mty = data.new_ir_type(*out, TCType::Unknown);
-                data.constraints.push(TypeConstraint::MemberOf(ity, mty, name.0));
+                data.constraints.push(TypeConstraint::MemberOf(pt, mty, name.0));
             },
             rsl_data::internal::ir::IRInstruction::Call { func, args, out, span } => todo!(),
             rsl_data::internal::ir::IRInstruction::Int { v, id, token_id, ty } => todo!(),
@@ -479,6 +565,7 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::hint::black_box;
     use std::{path::PathBuf, time::Instant};
 
     use rsl_data::internal::SourceSpan;
@@ -491,12 +578,19 @@ mod tests {
     #[test]
     fn simple() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = "#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }";
+        let code_template = "#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }";
+        let mut code = String::new();
+        const N: usize = 1;
+        for i in 0..N {
+            code += &code_template.replace("test", &("test".to_string() + &i.to_string()));
+        }
+        let code = black_box(code);
         let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],
             source_strings: vec![code.to_string()]
         });
-        let res = tokenize(code, 0, &strings);
+        let t0 = Instant::now();
+        let res = tokenize(&code, 0, &strings);
         match res {
             Ok((tokens, spans)) => {
                 let spans = spans.iter().map(|r| SourceSpan {
@@ -505,7 +599,6 @@ mod tests {
                     end: r.end,
                 }).collect::<Vec<_>>();
                 
-                let t1 = Instant::now();
                 let (m, e) = parse_file(&tokens, &spans, 0, vec![], &strings);
                 if ! e.is_empty() {
                     e.iter().for_each(|e| e.eprint(&mut cache).unwrap());
@@ -522,11 +615,18 @@ mod tests {
                 //toplevel.eval_constexprs();
                 
                 
-                
-                type_checking(&toplevel, &strings, match &toplevel.lookup(&strings.insert_get("::test::test")).unwrap().1 {
-                    GlobalItem::Function(function) => function,
-                    _ => panic!()
-                });
+                let t1 = Instant::now();
+                println!("Time: {} ms", (t1- t0).as_millis());
+                for i in 0..N {
+                    let f = match &toplevel.lookup(&strings.insert_get(&("::test::test".to_string() + &i.to_string()))).unwrap().1 {
+                        GlobalItem::Function(function) => function,
+                        _ => panic!()
+                    };
+                    type_checking(&toplevel, &strings, f);
+                    if i == 0 {
+                        println!("{:#?}", f);
+                    }
+                }
                 
                 let t2 = Instant::now();
                 println!("Time: {} ms", (t2- t1).as_millis());

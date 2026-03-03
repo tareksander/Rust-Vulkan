@@ -3,4 +3,16 @@ name = "rsl-spirv"
 version = "0.1.0"
 edition = "2024"
 
+
+
+
 [dependencies]
+rsl-data = { path = "../rsl-data" }
+rspirv.workspace = true
+bytemuck.workspace = true
+
+[dev-dependencies]
+rsl-type-checker = { path = "../rsl-type-checker" }
+rsl-parser = { path = "../rsl-parser" }
+rsl-lexer = { path = "../rsl-lexer" }
+

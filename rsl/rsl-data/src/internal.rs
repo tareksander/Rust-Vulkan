@@ -108,6 +108,24 @@ pub enum StorageClass {
     Logical,
 }
 
+impl StorageClass {
+    pub fn explicit_layout(&self) -> bool {
+        match self {
+            StorageClass::Input => false,
+            StorageClass::Output => false,
+            StorageClass::Function => false,
+            StorageClass::Private => false,
+            StorageClass::Push => true,
+            StorageClass::Storage => true,
+            StorageClass::PhysicalStorage => true,
+            StorageClass::Workgroup => true,
+            StorageClass::Uniform => true,
+            StorageClass::UniformConstant => false,
+            StorageClass::Logical => false,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Visibility {
@@ -177,7 +195,7 @@ pub enum ShaderType {
     // TODO ray tracing
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mutability {
     Immutable,
     Mutable
@@ -255,7 +273,7 @@ impl ariadne::Cache<usize> for ReportSourceCache {
 
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Builtin {
     GlobalInvocationId,
     

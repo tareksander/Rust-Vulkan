@@ -241,8 +241,10 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
         },
         Expression::Item(item_path) => {
             if item_path.global == false && item_path.segments.len() == 1 && item_path.segments[0].generic_args.len() == 0 &&
-                let Some(id) = locals.get(&item_path.segments[0].ident) {
-                *id
+               let Some(lid) = locals.get(&item_path.segments[0].ident) {
+                let i = id.next();
+                insert(blocks, IRInstruction::Load { ptr: *lid, out: i });
+                i
             } else {
                 let i = id.next();
                 let r = item_path.range();

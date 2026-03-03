@@ -1,7 +1,8 @@
 
 
 
-use std::{cell::RefCell, collections::HashMap, mem::replace, rc::Rc};
+use core::slice;
+use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Pointer}, hash::Hash, iter::Enumerate, mem::replace, rc::Rc};
 
 
 use crate::internal::{Builtin, Mutability, ShaderType, StringTable, Visibility, ast::ItemPathSegment};
@@ -96,8 +97,27 @@ impl SymbolTable {
     
     pub fn get(&self, id: SymbolID) -> &(Visibility, GlobalItem) {
         match &self.items[id.0].1 {
-            GlobalItem::ResolvedImport { path, id } => self.get(*id),
+            GlobalItem::ResolvedImport { path: _, id } => self.get(*id),
             _ => &self.items[id.0]
+        }
+    }
+    
+    pub fn get_mut(&mut self, id: SymbolID) -> &(Visibility, GlobalItem) {
+        match &mut self.items[id.0].1 {
+            GlobalItem::ResolvedImport { path: _, id } => {
+                let id = *id;
+                self.get_mut(id)
+            },
+            _ => {
+                &mut self.items[id.0]
+            }
+        }
+    }
+    
+    pub fn follow_imports(&self, id: SymbolID) -> SymbolID {
+        match &self.items[id.0].1 {
+            GlobalItem::ResolvedImport { path: _, id } => self.follow_imports(*id),
+            _ => id
         }
     }
     
@@ -164,6 +184,12 @@ impl SymbolTable {
         
         return t;
     }
+    
+    pub fn iter(&self) -> impl Iterator<Item = SymbolID> {
+        (0..self.items.len()).map(|e| SymbolID(e))
+    }
+    
+    
     
     
     pub fn eval_constexprs(&mut self) {
@@ -401,7 +427,7 @@ pub enum GlobalItem {
     Removed,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Function {
     pub attrs: Vec<Attribute>,
     pub ident_token: TokenRange,
@@ -412,6 +438,50 @@ pub struct Function {
     pub blocks: RefCell<Vec<IRBlock>>,
     pub next_id: RefCell<IRID>,
     pub types: RefCell<HashMap<IRID, Type>>,
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Function").field("attrs", &self.attrs).field("ident_token", &self.ident_token).field("shader_type", &self.shader_type).field("num_params", &self.num_params).field("ret", &self.ret)
+        .field("next_id", &self.next_id).finish()?;
+        let b = self.blocks.borrow();
+        let t = self.types.borrow();
+        let mut l = f.debug_list();
+        for b in b.iter() {
+            for i in &b.instructions {
+                l.entry(&i);
+                let mut print_type = |id: &IRID| {
+                    l.entry(&t[id]);
+                };
+                match i {
+                    IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
+                        print_type(id)
+                    },
+                    IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
+                        print_type(id)
+                    },
+                    IRInstruction::UnOp { inp, op, out, span } => {
+                        print_type(out)
+                    },
+                    IRInstruction::BinOp { lhs, op, rhs, out, span } => {
+                        print_type(out)
+                    },
+                    IRInstruction::Property { inp, name, out } => {
+                        print_type(out)
+                    },
+                    IRInstruction::Load { ptr, out } => {
+                        print_type(out)
+                    },
+                    IRInstruction::Store { ptr, value } => {
+                        print_type(value)
+                    },
+                    _ => {}
+                }
+            }
+        }
+        l.finish()?;
+        Ok(())
+    }
 }
 
 
@@ -453,13 +523,97 @@ pub enum Type {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Unresolved(l0), Self::Unresolved(r0)) => unreachable!(),
+            (Self::Resolved(l0), Self::Resolved(r0)) => l0 == r0,
+            (Self::Primitive(l0), Self::Primitive(r0)) => l0 == r0,
+            (Self::Vector { components: l_components, ty: l_ty }, Self::Vector { components: r_components, ty: r_ty }) => l_components == r_components && l_ty == r_ty,
+            (Self::Matrix { rows: l_rows, cols: l_cols, ty: l_ty }, Self::Matrix { rows: r_rows, cols: r_cols, ty: r_ty }) => l_rows == r_rows && l_cols == r_cols && l_ty == r_ty,
+            (Self::Array { length: l_length, ty: l_ty }, Self::Array { length: r_length, ty: r_ty }) => l_length == r_length && l_ty == r_ty,
+            (Self::UnresolvedArray { length: l_length, ty: l_ty }, Self::UnresolvedArray { length: r_length, ty: r_ty }) => unreachable!(),
+            (Self::RuntimeArray { ty: l_ty }, Self::RuntimeArray { ty: r_ty }) => l_ty == r_ty,
+            (Self::Pointer { class: l_class, ty: l_ty, mutability: l_mutability }, Self::Pointer { class: r_class, ty: r_ty, mutability: r_mutability }) => l_class == r_class && l_ty == r_ty && l_mutability == r_mutability,
+            (Self::Reference { class: l_class, ty: l_ty, mutability: l_mutability }, Self::Reference { class: r_class, ty: r_ty, mutability: r_mutability }) => l_class == r_class && l_ty == r_ty && l_mutability == r_mutability,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Type {}
+
+impl Hash for Type {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Primitive {
     U8, U16, U32, U64,
     I8, I16, I32, I64,
     F16, F32, F64,
     Bool,
     Unit
+}
+
+impl Primitive {
+    
+    pub fn is_number(&self) -> bool {
+        use Primitive::*;
+        match *self {
+            U8 | U16 | U32 | U64 |
+            I8 | I16 | I32 | I64 |
+            F16 | F32 | F64 => true,
+            _ => false,
+        }
+    }
+    
+    pub fn is_float(&self) -> bool {
+        use Primitive::*;
+        match *self {
+            F16 | F32 | F64 => true,
+            _ => false,
+        }
+    }
+    
+    pub fn is_int(&self) -> bool {
+        use Primitive::*;
+        match *self {
+            U8 | U16 | U32 | U64 |
+            I8 | I16 | I32 | I64 => true,
+            _ => false,
+        }
+    }
+    
+    pub fn is_uint(&self) -> bool {
+        use Primitive::*;
+        match *self {
+            U8 | U16 | U32 | U64 => true,
+            _ => false,
+        }
+    }
+    
+    pub fn is_sint(&self) -> bool {
+        use Primitive::*;
+        match *self {
+            I8 | I16 | I32 | I64 => true,
+            _ => false,
+        }
+    }
+    
+    
+    pub fn is_unit(&self) -> bool {
+        *self == Primitive::Unit
+    }
+    
+    pub fn is_bool(&self) -> bool {
+        *self == Primitive::Bool
+    }
+    
+    
 }
 
 
