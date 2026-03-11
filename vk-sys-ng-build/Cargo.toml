@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 
 xml.workspace = true
+logos.workspace = true
+bitflags.workspace = true
+regex.workspace = true
