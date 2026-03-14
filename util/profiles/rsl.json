@@ -1,0 +1,112 @@
+{
+    "$schema": "https://schema.khronos.org/vulkan/profiles-0.8-latest.json#",
+    "capabilities": {
+        "base": {
+            "extensions": {
+                "VK_KHR_maintenance7": 1,
+                "VK_KHR_maintenance8": 1,
+                "VK_KHR_maintenance9": 1,
+                "VK_KHR_pipeline_binary": 1,
+                "VK_KHR_shader_maximal_reconvergence": 1
+            },
+            "features": {
+                "VkPhysicalDeviceFeatures": {
+                    "shaderInt16": true,
+                    "shaderSampledImageArrayDynamicIndexing": true,
+                    "shaderStorageImageArrayDynamicIndexing": true,
+                    "shaderStorageBufferArrayDynamicIndexing": true,
+                    "shaderUniformBufferArrayDynamicIndexing": true,
+                    "fragmentStoresAndAtomics": true
+                },
+                "VkPhysicalDeviceVulkan11Features": {
+                    "shaderDrawParameters": true,
+                    "variablePointers": true,
+                    "variablePointersStorageBuffer": true,
+                    "uniformAndStorageBuffer16BitAccess": true,
+                    "storageBuffer16BitAccess": true,
+                    "storageInputOutput16": true,
+                    "storagePushConstant16": true
+                },
+                "VkPhysicalDeviceVulkan12Features": {
+                    "vulkanMemoryModel": true,
+                    "bufferDeviceAddress": true,
+                    "runtimeDescriptorArray": true,
+                    "descriptorIndexing": true,
+                    "shaderSampledImageArrayNonUniformIndexing": true,
+                    "descriptorBindingSampledImageUpdateAfterBind": true,
+                    "shaderStorageImageArrayNonUniformIndexing": true,
+                    "descriptorBindingStorageImageUpdateAfterBind": true,
+                    "shaderStorageBufferArrayNonUniformIndexing": true,
+                    "descriptorBindingStorageBufferUpdateAfterBind": true,
+                    "shaderUniformBufferArrayNonUniformIndexing": true,
+                    "descriptorBindingUniformBufferUpdateAfterBind": true,
+                    "shaderInputAttachmentArrayDynamicIndexing": true,
+                    "shaderInputAttachmentArrayNonUniformIndexing": true,
+                    "descriptorBindingPartiallyBound": true,
+                    "descriptorBindingVariableDescriptorCount": true,
+                    "descriptorBindingUpdateUnusedWhilePending": true,
+                    "shaderFloat16": true,
+                    "storageBuffer8BitAccess": true,
+                    "storagePushConstant8": true,
+                    "uniformAndStorageBuffer8BitAccess": true,
+                    "scalarBlockLayout": true,
+                    "subgroupBroadcastDynamicId": true
+                },
+                "VkPhysicalDeviceVulkan13Features": {
+                    "dynamicRendering": true,
+                    "computeFullSubgroups": true,
+                    "maintenance4": true,
+                    "synchronization2": true
+                },
+                "VkPhysicalDeviceVulkan14Features": {
+                    "shaderFloatControls2": true,
+                    "shaderSubgroupRotate": true,
+                    "maintenance5": true,
+                    "maintenance6": true,
+                    "dynamicRenderingLocalRead": true
+                },
+                "VkPhysicalDeviceMaintenance7FeaturesKHR": {
+                    "maintenance7": true
+                },
+                "VkPhysicalDeviceMaintenance8FeaturesKHR": {
+                    "maintenance8": true
+                },
+                "VkPhysicalDeviceMaintenance9FeaturesKHR": {
+                    "maintenance9": true
+                },
+                "VkPhysicalDevicePipelineBinaryFeaturesKHR": {
+                    "pipelineBinaries": true
+                },
+                "VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR": {
+                    "shaderMaximalReconvergence": true
+                }
+            },
+            "properties": {
+                "VkPhysicalDeviceVulkan11Properties": {
+                    "subgroupSupportedStages": ["VK_SHADER_STAGE_COMPUTE_BIT"],
+                    "subgroupSize": 2,
+                    "subgroupSupportedOperations": [
+                        "VK_SUBGROUP_FEATURE_BASIC_BIT",
+                        "VK_SUBGROUP_FEATURE_ARITHMETIC_BIT",
+                        "VK_SUBGROUP_FEATURE_VOTE_BIT",
+                        "VK_SUBGROUP_FEATURE_BALLOT_BIT",
+                        "VK_SUBGROUP_FEATURE_ROTATE_BIT",
+                        "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
+                        "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT"
+                    ]
+                }
+            }
+        }
+    },
+    "profiles": {
+        "VP_RSL_MIN": {
+            "version": 1,
+            "api-version": "1.4.341",
+            "label": "RSL Minimum Requirements",
+            "description": "Minimum required Vulkan capabilities for running RSL programs",
+            "capabilities": [
+                "base"
+            ]
+        }
+    }
+}
