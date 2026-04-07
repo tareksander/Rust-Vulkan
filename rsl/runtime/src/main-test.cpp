@@ -1,0 +1,134 @@
+
+#include "main.hpp"
+
+#include <iostream>
+#include <vector>
+#include <fstream>
+#include <filesystem>
+
+
+
+
+int main() {
+    
+    const int size = 128;
+    auto c = rsl::Context::init();
+    auto ba = c.device.createBuffer(vk::BufferCreateInfo {
+        .sharingMode = vk::SharingMode::eConcurrent,
+        .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
+        .size = size * 4,
+    });
+    auto bb = c.device.createBuffer(vk::BufferCreateInfo {
+        .sharingMode = vk::SharingMode::eConcurrent,
+        .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
+        .size = size * 4,
+    });
+    auto bc = c.device.createBuffer(vk::BufferCreateInfo {
+        .sharingMode = vk::SharingMode::eConcurrent,
+        .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
+        .size = size * 4,
+    });
+    auto mem = c.device.allocateMemory(vk::MemoryAllocateInfo {
+        .memoryTypeIndex = c.mem_device_visible_buffer,
+        .allocationSize = size * 4 * 3,
+    });
+    ba.bindMemory(mem, 0);
+    bb.bindMemory(mem, size * 4);
+    bc.bindMemory(mem, size * 4 * 2);
+    
+    auto mapped_memory = (uint32_t*) c.device.mapMemory2(vk::MemoryMapInfo {
+        .memory = mem,
+        .offset = 0,
+        .size = size * 4 * 3,
+    });
+    
+    for (int i = 0; i < size; i++) {
+        mapped_memory[i] = i;
+        mapped_memory[i + size] = i + 3;
+    }
+    
+    
+    
+    std::vector<uint32_t> shader_code;
+    std::ifstream shader_file {"../rsl/rsl-spirv/test.spv", std::ios::binary | std::ios::ate};
+    std::cout << std::filesystem::current_path() << std::endl;
+    if (shader_file.bad()) {
+        throw std::runtime_error("Unable to load shader file");
+    }
+    shader_code.resize(shader_file.tellg()/4);
+    shader_file.seekg(0, std::ios::beg);
+    shader_file.read((char*) shader_code.data(), shader_code.size()*4);
+    if (shader_file.bad()) {
+        throw std::runtime_error("Unable to load shader file");
+    }
+    std::ofstream("test.spv", std::ios::binary).write((char*)shader_code.data(), shader_code.size() * 4);
+    auto prange = vk::PushConstantRange {
+        .offset = 0,
+        .size = 24,
+        .stageFlags = vk::ShaderStageFlagBits::eCompute,
+    };
+    auto l = c.device.createPipelineLayout(vk::PipelineLayoutCreateInfo {
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &prange,
+    });
+    
+    auto mod = vk::ShaderModuleCreateInfo {
+        .codeSize = shader_code.size()*4,
+        .pCode = shader_code.data(),
+    };
+    
+    auto shader = c.device.createComputePipeline(nullptr, vk::ComputePipelineCreateInfo {
+        .layout = l,
+        .stage = vk::PipelineShaderStageCreateInfo {
+            .pName = "test",
+            .stage = vk::ShaderStageFlagBits::eCompute,
+            .pNext = &mod,
+        }
+    });
+    
+    auto cpool = c.device.createCommandPool(vk::CommandPoolCreateInfo {
+        .queueFamilyIndex = c.main_qf,
+    });
+    
+    auto cb = std::move(c.device.allocateCommandBuffers(vk::CommandBufferAllocateInfo {
+        .commandBufferCount = 1,
+        .commandPool = cpool,
+        .level = vk::CommandBufferLevel::ePrimary,
+    })[0]);
+    
+    cb.begin(vk::CommandBufferBeginInfo {});
+    
+    
+    cb.bindPipeline(vk::PipelineBindPoint::eCompute, shader);
+    uint64_t push_data[3];
+    push_data[0] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
+        .buffer = ba
+    });
+    push_data[1] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
+        .buffer = bb
+    });
+    push_data[2] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
+        .buffer = bc
+    });
+    
+    cb.pushConstants<uint64_t>(l, vk::ShaderStageFlagBits::eCompute, 0, vk::ArrayProxy(3, push_data));
+    
+    cb.dispatch(size / 32, 1, 1);
+    
+    cb.end();
+    c.mainQueue.submit(vk::SubmitInfo {
+        .commandBufferCount = 1,
+        .pCommandBuffers = &*cb,
+    });
+    
+    c.device.waitIdle();
+    
+    std::cout << "context created" << std::endl;
+    for (int i = 0; i < size; i++) {
+        std:: cout << mapped_memory[size * 2 + i] << std::endl;
+    }
+    
+    
+}
+
+

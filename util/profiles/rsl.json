@@ -7,7 +7,8 @@
                 "VK_KHR_maintenance8": 1,
                 "VK_KHR_maintenance9": 1,
                 "VK_KHR_pipeline_binary": 1,
-                "VK_KHR_shader_maximal_reconvergence": 1
+                "VK_KHR_shader_maximal_reconvergence": 1,
+                "VK_EXT_device_generated_commands": 1
             },
             "features": {
                 "VkPhysicalDeviceFeatures": {
@@ -16,16 +17,15 @@
                     "shaderStorageImageArrayDynamicIndexing": true,
                     "shaderStorageBufferArrayDynamicIndexing": true,
                     "shaderUniformBufferArrayDynamicIndexing": true,
-                    "fragmentStoresAndAtomics": true
+                    "fragmentStoresAndAtomics": true,
+                    "multiDrawIndirect": true
                 },
                 "VkPhysicalDeviceVulkan11Features": {
                     "shaderDrawParameters": true,
                     "variablePointers": true,
                     "variablePointersStorageBuffer": true,
                     "uniformAndStorageBuffer16BitAccess": true,
-                    "storageBuffer16BitAccess": true,
-                    "storageInputOutput16": true,
-                    "storagePushConstant16": true
+                    "storageBuffer16BitAccess": true
                 },
                 "VkPhysicalDeviceVulkan12Features": {
                     "vulkanMemoryModel": true,
@@ -47,10 +47,11 @@
                     "descriptorBindingUpdateUnusedWhilePending": true,
                     "shaderFloat16": true,
                     "storageBuffer8BitAccess": true,
-                    "storagePushConstant8": true,
                     "uniformAndStorageBuffer8BitAccess": true,
                     "scalarBlockLayout": true,
-                    "subgroupBroadcastDynamicId": true
+                    "shaderInt8": true,
+                    "timelineSemaphore": true,
+                    "uniformBufferStandardLayout": true
                 },
                 "VkPhysicalDeviceVulkan13Features": {
                     "dynamicRendering": true,
@@ -79,6 +80,9 @@
                 },
                 "VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR": {
                     "shaderMaximalReconvergence": true
+                },
+                "VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT": {
+                    "deviceGeneratedCommands": true
                 }
             },
             "properties": {
@@ -94,18 +98,100 @@
                         "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
                         "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT"
                     ]
+                },
+                "VkPhysicalDeviceVulkan14Properties": {
+                    "dynamicRenderingLocalReadDepthStencilAttachments": true
+                },
+                "VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT": {
+                    "supportedIndirectCommandsShaderStagesPipelineBinding": [
+                        "VK_SHADER_STAGE_COMPUTE_BIT"
+                    ]
                 }
+            }
+        },
+        "mesh_shaders": {
+            "extensions": {
+                "VK_EXT_mesh_shader": 1
+            }
+        },
+        "mesh_shaders_dgc": {
+            "properties": {
+                "VkPhysicalDeviceDeviceGeneratedCommandsPropertiesEXT": {
+                    "supportedIndirectCommandsShaderStagesPipelineBinding": [
+                        "VK_SHADER_STAGE_MESH_BIT_EXT"
+                    ]
+                }
+            }
+        },
+        "display_base": {
+            "extensions": {
+                "VK_KHR_surface": 1,
+                "VK_KHR_swapchain": 1
+            }
+        },
+        "present_timing": {
+            "extensions": {
+                "VK_KHR_present_id2": 1,
+                "VK_KHR_present_wait2": 1
+            }
+        },
+        "surface_maintenance_ext": {
+            "extensions": {
+                "VK_EXT_surface_maintenance1": 1
+            }
+        },
+        "surface_maintenance_khr": {
+            "extensions": {
+                "VK_KHR_surface_maintenance1": 1
+            }
+        },
+        "swapchain_maintenance_ext": {
+            "extensions": {
+                "VK_EXT_swapchain_maintenance1": 1
+            }
+        },
+        "swapchain_maintenance_khr": {
+            "extensions": {
+                "VK_KHR_swapchain_maintenance1": 1
+            }
+        },
+        "fifo_latest_ready": {
+            "extensions": {
+                "VK_KHR_present_mode_fifo_latest_ready": 1
+            }
+        },
+        "hdr": {
+            "extensions": {
+                "VK_EXT_hdr_metadata": 1
+            }
+        },
+        "colorspace": {
+            "extensions": {
+                "VK_EXT_swapchain_colorspace": 1
             }
         }
     },
     "profiles": {
-        "VP_RSL_MIN": {
+        "VP_RSL_min": {
             "version": 1,
-            "api-version": "1.4.341",
+            "api-version": "1.4.0",
             "label": "RSL Minimum Requirements",
             "description": "Minimum required Vulkan capabilities for running RSL programs",
             "capabilities": [
                 "base"
+            ],
+            "optionals": [
+                "mesh_shaders",
+                "mesh_shaders_dgc",
+                "display_base",
+                "present_timing",
+                "surface_maintenance_ext",
+                "surface_maintenance_khr",
+                "swapchain_maintenance_ext",
+                "swapchain_maintenance_khr",
+                "fifo_latest_ready",
+                "hdr",
+                "colorspace"
             ]
         }
     }

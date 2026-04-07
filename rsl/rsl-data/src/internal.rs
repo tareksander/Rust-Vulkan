@@ -192,7 +192,9 @@ pub enum ShaderType {
     Fragment,
     Task,
     Mesh,
-    // TODO ray tracing
+    // TODO ray tracing. Or just use ray queries?
+    Flow,
+    Graph,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

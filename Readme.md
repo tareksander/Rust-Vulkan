@@ -23,8 +23,9 @@ pub compute fn add(
 - [ ] 0.1: MVP
     - [ ] Compute shaders
     - [ ] Images & samplers
-    - [ ] Struct definition builder for Rust
+        - Using a bindless scheme that should map well to descriptor indexing and descriptor heaps
     - [ ] Work graphs by dispatching from a compute shader
+        - More like "work trees" for now, figure out a graph structure later
 - [ ] 0.2: Shading
     - [ ] Vertex shaders
     - [ ] Fragment shaders

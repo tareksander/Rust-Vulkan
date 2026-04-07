@@ -1,9 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
 use rsl_data::internal::{Attribute, Builtin, Mutability, ShaderType, StorageClass, StringTable, ast::TokenRange, ir::{Function, GlobalItem, IRID, IRInstruction, Primitive, SymbolTable, Type}};
-use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionModel, FunctionControl, MemoryAccess, MemoryModel}};
+use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FunctionControl, MemoryAccess, MemoryModel}};
 
+trait SpirvBuiltin {
+    fn spirv(&self) -> rspirv::spirv::BuiltIn;
+}
 
+impl SpirvBuiltin for Builtin {
+    fn spirv(&self) -> rspirv::spirv::BuiltIn {
+        use rspirv::spirv::BuiltIn::*;
+        match self {
+            Builtin::GlobalInvocationId => GlobalInvocationId,
+        }
+    }
+}
 
 
 trait SpirvStorage {
@@ -278,12 +289,17 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         
         
         
-        
+        // Core capabilities
         b.capability(Capability::Shader);
         b.capability(Capability::Matrix);
+        b.capability(Capability::ImageQuery);
+        b.capability(Capability::DerivativeControl);
+        b.capability(Capability::InputAttachment);
+        b.capability(Capability::StorageImageExtendedFormats);
+        
+        
         b.capability(Capability::VulkanMemoryModel);
         b.capability(Capability::PhysicalStorageBufferAddresses);
-        b.capability(Capability::UniformDecoration);
         b.capability(Capability::ShaderNonUniform);
         b.capability(Capability::DrawParameters);
         b.capability(Capability::VariablePointersStorageBuffer);
@@ -295,9 +311,6 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::Int8);
         b.capability(Capability::Float16);
         
-        b.capability(Capability::Groups);
-        b.capability(Capability::SubgroupBallotKHR);
-        b.capability(Capability::SubgroupVoteKHR);
         b.capability(Capability::GroupNonUniform);
         b.capability(Capability::GroupNonUniformArithmetic);
         b.capability(Capability::GroupNonUniformVote);
@@ -311,10 +324,9 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::WorkgroupMemoryExplicitLayout8BitAccessKHR);
         b.capability(Capability::UniformAndStorageBuffer16BitAccess);
         b.capability(Capability::UniformAndStorageBuffer8BitAccess);
-        b.capability(Capability::StoragePushConstant16);
-        b.capability(Capability::StoragePushConstant8);
-        b.capability(Capability::StorageInputOutput16);
-        b.capability(Capability::StorageUniform16);
+        // b.capability(Capability::StoragePushConstant16);
+        // b.capability(Capability::StoragePushConstant8);
+        // b.capability(Capability::StorageInputOutput16);
         
         b.capability(Capability::UniformBufferArrayDynamicIndexing);
         b.capability(Capability::UniformBufferArrayNonUniformIndexing);
@@ -324,6 +336,8 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::StorageImageArrayNonUniformIndexing);
         b.capability(Capability::SampledImageArrayDynamicIndexing);
         b.capability(Capability::SampledImageArrayNonUniformIndexing);
+        b.capability(Capability::InputAttachmentArrayDynamicIndexing);
+        b.capability(Capability::InputAttachmentArrayNonUniformIndexing);
     }
     
     // TODO simply declare all builtins that are valid for each stage for each entrypoint and see if spirv-opt filters them out
@@ -347,6 +361,7 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
                     if attrs.contains(&Attribute::Builtin(builtin.clone())) && ! builtins_defined.contains(&builtin) {
                         let ty = d.types.get(d.b, &Type::Pointer { class: StorageClass::Input, ty: Box::new(ty.clone()), mutability: Mutability::Immutable }, false);
                         d.b.variable(ty, Some(d.builtins[&builtin]), spirv::StorageClass::Input, None);
+                        d.b.decorate(d.builtins[&builtin], Decoration::BuiltIn, [Operand::BuiltIn(builtin.spirv())]);
                         builtins_defined.insert(builtin);
                     }
                 };
@@ -362,6 +377,7 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
                     if let Some(push) = id.1 {
                         interface.push(push);
                     }
+                    d.b.execution_mode(id.0, ExecutionMode::LocalSize, [32, 1, 1]);
                     d.b.entry_point(ExecutionModel::GLCompute, id.0, "test", interface);
                 }
             }
