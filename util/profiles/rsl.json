@@ -18,7 +18,13 @@
                     "shaderStorageBufferArrayDynamicIndexing": true,
                     "shaderUniformBufferArrayDynamicIndexing": true,
                     "fragmentStoresAndAtomics": true,
-                    "multiDrawIndirect": true
+                    "multiDrawIndirect": true,
+                    "fullDrawIndexUint32": true,
+                    "drawIndirectFirstInstance": true,
+                    "samplerAnisotropy": true,
+                    "shaderStorageImageExtendedFormats": true,
+                    "shaderImageGatherExtended": true,
+                    "sampleRateShading": true
                 },
                 "VkPhysicalDeviceVulkan11Features": {
                     "shaderDrawParameters": true,
@@ -51,7 +57,8 @@
                     "scalarBlockLayout": true,
                     "shaderInt8": true,
                     "timelineSemaphore": true,
-                    "uniformBufferStandardLayout": true
+                    "uniformBufferStandardLayout": true,
+                    "drawIndirectCount": true
                 },
                 "VkPhysicalDeviceVulkan13Features": {
                     "dynamicRendering": true,
