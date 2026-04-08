@@ -1,5 +1,5 @@
 [workspace]
-members = [ "rsl/rsl-borrow-checker", "rsl/rslc", "rsl/rsl-data", "rsl/rsl-lexer", "rsl/rsl-lsp", "rsl/rsl-parser", "rsl/rsl-spirv", "rsl/rsl-type-checker" , "vk-sys-ng", "vk-sys-ng-build"]
+members = [ "rsl/rsl-borrow-checker", "rsl/rslc", "rsl/rsl-data", "rsl/rsl-lexer", "rsl/rsl-lsp", "rsl/rsl-parser", "rsl/rsl-spirv", "rsl/rsl-type-checker" ]
 resolver = "3"
 
 
