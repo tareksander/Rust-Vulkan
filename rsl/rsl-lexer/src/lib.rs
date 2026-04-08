@@ -366,7 +366,7 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                                     return Ok(());
                                 }
                             }
-                            check_float(start)?;
+                            return check_float(start);
                         }
                         i.set(i.get()-1);
                         break;

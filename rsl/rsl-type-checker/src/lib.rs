@@ -18,6 +18,7 @@ enum TCType {
         components: Option<u8>,
         ty: Box<TCType>,
     },
+    Float,
     Int,
     UInt,
     SInt,
@@ -58,12 +59,13 @@ impl TCType {
         match self {
             TCType::Struct(symbol_id) => todo!(),
             TCType::Function { sym, params } => todo!(),
-            TCType::Number => self.clone(),
+            TCType::Number => TCType::Primitive(Primitive::I32),
             TCType::Primitive(primitive) => self.clone(),
             TCType::Vector { components, ty } => TCType::Vector { components: *components, ty: Box::new(ty.canonicalize(table)) },
-            TCType::Int => todo!(),
-            TCType::UInt => todo!(),
-            TCType::SInt => todo!(),
+            TCType::Float => TCType::Primitive(Primitive::F32),
+            TCType::Int => TCType::Primitive(Primitive::I32),
+            TCType::UInt => TCType::Primitive(Primitive::U32),
+            TCType::SInt => TCType::Primitive(Primitive::I32),
             TCType::VecOrStruct => todo!(),
             TCType::Indexable => todo!(),
             TCType::Matrix { rows, cols, ty } => todo!(),
@@ -88,6 +90,7 @@ impl TCType {
                     _ => todo!()
                 }
             },
+            TCType::Float => todo!(),
             TCType::Int => todo!(),
             TCType::UInt => todo!(),
             TCType::SInt => todo!(),
@@ -170,6 +173,7 @@ impl TCType {
             
             
             (TCType::Number, TCType::Number) => v1.clone(),
+            (TCType::Float, TCType::Float) => v1.clone(),
             (TCType::Int, TCType::Int) => v1.clone(),
             (TCType::SInt, TCType::SInt) => v1.clone(),
             (TCType::UInt, TCType::UInt) => v1.clone(),
@@ -211,10 +215,21 @@ impl TCType {
             },
             (TCType::Primitive(p), TCType::SInt) => Self::unify_val_val(data, v2, v1)?,
             
+            (TCType::Float, TCType::Primitive(p)) => {
+                if p.is_float() {
+                    v2.clone()
+                } else {
+                    return Err(());
+                }
+            },
+            (TCType::Primitive(p), TCType::Float) => Self::unify_val_val(data, v2, v1)?,
             
             
             (TCType::Number, TCType::Int) => v2.clone(),
             (TCType::Int, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::Number, TCType::Float) => v2.clone(),
+            (TCType::Float, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
             
             (TCType::Number, TCType::UInt) => v2.clone(),
             (TCType::UInt, TCType::Number) => Self::unify_val_val(data, v2, v1)?,
@@ -418,12 +433,17 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
             }
         }
     });
+    if ! c.is_empty() {
+        panic!("unimplemented type constraints")
+    }
+    
     // println!("{:#?}", c);
     // for (i, v) in d.type_vars.iter().enumerate() {
     //     println!("Type var {} for SSA {}: {:#?}", i, d.reverse_type_table.get(&TypeID(i as u32)).cloned().unwrap_or(IRID(usize::MAX)).0, v);
     // }
     for (id, ty) in &d.tc_type_table {
-        d.type_table.insert(*id, d.type_vars[ty.0 as usize].canonicalize(&d.type_vars).to_ir_type());
+        let t = &d.type_vars[ty.0 as usize];
+        d.type_table.insert(*id, t.canonicalize(&d.type_vars).to_ir_type());
     }
     
 }
@@ -494,37 +514,35 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 let lhsty = data.tc_type_table[lhs];
                 let rhsty = data.tc_type_table[rhs];
                 let outty = data.new_ir_type(*out, TCType::Unknown);
+                use rsl_data::internal::ast::BinOp;
                 match *op {
-                    rsl_data::internal::ast::BinOp::Add => {
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
                         data.constraints.push(TypeConstraint::Number(outty));
                         data.constraints.push(TypeConstraint::Number(lhsty));
                         data.constraints.push(TypeConstraint::Number(rhsty));
                         data.constraints.push(TypeConstraint::Same(outty, lhsty));
                         data.constraints.push(TypeConstraint::Same(rhsty, lhsty));
                     },
-                    rsl_data::internal::ast::BinOp::Sub => todo!(),
-                    rsl_data::internal::ast::BinOp::Mul => todo!(),
-                    rsl_data::internal::ast::BinOp::Div => todo!(),
-                    rsl_data::internal::ast::BinOp::Mod => todo!(),
-                    rsl_data::internal::ast::BinOp::BinAnd => todo!(),
-                    rsl_data::internal::ast::BinOp::LogAnd => todo!(),
-                    rsl_data::internal::ast::BinOp::BinOr => todo!(),
-                    rsl_data::internal::ast::BinOp::LogOr => todo!(),
-                    rsl_data::internal::ast::BinOp::BinXor => todo!(),
-                    rsl_data::internal::ast::BinOp::Index => {
+                    BinOp::Mod => todo!(),
+                    BinOp::BinAnd => todo!(),
+                    BinOp::LogAnd => todo!(),
+                    BinOp::BinOr => todo!(),
+                    BinOp::LogOr => todo!(),
+                    BinOp::BinXor => todo!(),
+                    BinOp::Index => {
                         let mt = data.new_free_type(TCType::Unknown);
                         data.constraints.push(TypeConstraint::PointerOf(lhsty, mt));
                         data.constraints.push(TypeConstraint::PointerOf(outty, mt));
                         data.constraints.push(TypeConstraint::Uint(rhsty));
                         data.constraints.push(TypeConstraint::SamePointerMeta(lhsty, outty));
                     },
-                    rsl_data::internal::ast::BinOp::Assign => todo!(),
-                    rsl_data::internal::ast::BinOp::Equals => todo!(),
-                    rsl_data::internal::ast::BinOp::NotEquals => todo!(),
-                    rsl_data::internal::ast::BinOp::Less => todo!(),
-                    rsl_data::internal::ast::BinOp::LessEquals => todo!(),
-                    rsl_data::internal::ast::BinOp::Greater => todo!(),
-                    rsl_data::internal::ast::BinOp::GreaterEquals => todo!(),
+                    BinOp::Assign => unreachable!(),
+                    BinOp::Equals => todo!(),
+                    BinOp::NotEquals => todo!(),
+                    BinOp::Less => todo!(),
+                    BinOp::LessEquals => todo!(),
+                    BinOp::Greater => todo!(),
+                    BinOp::GreaterEquals => todo!(),
                 }
             },
             rsl_data::internal::ir::IRInstruction::Unit { out } => {
@@ -546,8 +564,12 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 data.constraints.push(TypeConstraint::MemberOf(pt, mty, name.0));
             },
             rsl_data::internal::ir::IRInstruction::Call { func, args, out, span } => todo!(),
-            rsl_data::internal::ir::IRInstruction::Int { v, id, token_id, ty } => todo!(),
-            rsl_data::internal::ir::IRInstruction::Float { v, id, token_id, ty } => todo!(),
+            rsl_data::internal::ir::IRInstruction::Int { v, id, token_id, ty } => {
+                data.new_ir_type(*id, TCType::Int);
+            },
+            rsl_data::internal::ir::IRInstruction::Float { v, id, token_id, ty } => {
+                data.new_ir_type(*id, TCType::Float);
+            },
             rsl_data::internal::ir::IRInstruction::Cast { inp, out, ty } => todo!(),
             rsl_data::internal::ir::IRInstruction::Spread { inp, out, uni } => todo!(),
             rsl_data::internal::ir::IRInstruction::ReturnValue { id, token_id } => todo!(),

@@ -113,7 +113,7 @@ impl<'a> SpirvTypeCache<'a> {
                     Primitive::I32 => todo!(),
                     Primitive::I64 => todo!(),
                     Primitive::F16 => todo!(),
-                    Primitive::F32 => todo!(),
+                    Primitive::F32 => TypeLayout { alignment: 4, size: 4 },
                     Primitive::F64 => todo!(),
                     Primitive::Bool => todo!(),
                     Primitive::Unit => unreachable!(),
@@ -296,6 +296,7 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::DerivativeControl);
         b.capability(Capability::InputAttachment);
         b.capability(Capability::StorageImageExtendedFormats);
+        b.capability(Capability::ImageQuery);
         
         
         b.capability(Capability::VulkanMemoryModel);
@@ -494,14 +495,69 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
         },
         IRInstruction::UnOp { inp, op, out, span } => todo!(),
         IRInstruction::BinOp { lhs, op, rhs, out, span } => {
+            macro_rules! gen_op {
+                ($op:ident) => {
+                    let t = d.get_type(&types[out], false);
+                    idmap.insert(*out, d.b.$op(t, None, idmap[lhs], idmap[rhs]).unwrap());
+                };
+            }
             match op {
                 rsl_data::internal::ast::BinOp::Add => {
-                    let t = d.get_type(&types[out], false);
-                    idmap.insert(*out, d.b.i_add(t, None, idmap[lhs], idmap[rhs]).unwrap());
+                    if let Type::Primitive(p) = &types[out] {
+                        if p.is_int() {
+                            gen_op!(i_add);
+                        } else if p.is_float() {
+                            gen_op!(f_add);
+                        } else {
+                            todo!()
+                        }
+                    } else {
+                        todo!()
+                    }
                 },
-                rsl_data::internal::ast::BinOp::Sub => todo!(),
-                rsl_data::internal::ast::BinOp::Mul => todo!(),
-                rsl_data::internal::ast::BinOp::Div => todo!(),
+                rsl_data::internal::ast::BinOp::Sub => {
+                    if let Type::Primitive(p) = &types[out] {
+                        if p.is_int() {
+                            gen_op!(i_sub);
+                        } else if p.is_float() {
+                            gen_op!(f_sub);
+                        } else {
+                            todo!()
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::Mul => {
+                    if let Type::Primitive(p) = &types[out] {
+                        if p.is_int() {
+                            gen_op!(i_mul);
+                        } else if p.is_float() {
+                            gen_op!(f_mul);
+                        } else {
+                            todo!()
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::Div => {
+                    if let Type::Primitive(p) = &types[out] {
+                        if p.is_int() {
+                            if p.is_sint() {
+                                gen_op!(s_div);
+                            } else {
+                                gen_op!(u_div);
+                            }
+                        } else if p.is_float() {
+                            gen_op!(f_div);
+                        } else {
+                            todo!()
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
                 rsl_data::internal::ast::BinOp::Mod => todo!(),
                 rsl_data::internal::ast::BinOp::BinAnd => todo!(),
                 rsl_data::internal::ast::BinOp::LogAnd => todo!(),
@@ -628,8 +684,14 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
             }
         },
         IRInstruction::Call { func, args, out, span } => todo!(),
-        IRInstruction::Int { v, id, token_id, ty } => todo!(),
-        IRInstruction::Float { v, id, token_id, ty } => todo!(),
+        IRInstruction::Int { v, id, token_id, ty } => {
+            let t = d.get_type(&types[id], false);
+            idmap.insert(*id, d.b.constant_bit32(t, *v as u32));
+        },
+        IRInstruction::Float { v, id, token_id, ty } => {
+            let t = d.get_type(&types[id], false);
+            idmap.insert(*id, d.b.constant_bit32(t, (*v as f32).to_bits()));
+        },
         IRInstruction::Cast { inp, out, ty } => todo!(),
         IRInstruction::Spread { inp, out, uni } => todo!(),
         IRInstruction::ReturnValue { id, token_id } => todo!(),

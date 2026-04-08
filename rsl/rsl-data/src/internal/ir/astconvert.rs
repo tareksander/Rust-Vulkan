@@ -253,8 +253,16 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
             }
         },
         Expression::Group(expression) => expr_to_blocks(blocks, *expression, lvalue, id, locals),
-        Expression::IntLiteral(_, token_range) => todo!(),
-        Expression::FloatLiteral(_, token_range) => todo!(),
+        Expression::IntLiteral(v, token_range) => {
+            let i = id.next();
+            insert(blocks, IRInstruction::Int { v, id: i, token_id: token_range, ty: None });
+            i
+        },
+        Expression::FloatLiteral(v, token_range) => {
+            let i = id.next();
+            insert(blocks, IRInstruction::Float { v, id: i, token_id: token_range, ty: None });
+            i
+        },
         Expression::Call(item_path, expressions) => todo!(),
         Expression::If { condition, then, other } => todo!(),
         Expression::Loop { block } => todo!(),

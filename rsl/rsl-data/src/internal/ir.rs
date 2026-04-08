@@ -63,20 +63,32 @@ impl SymbolTable {
             }
         ], global: true }, span: dummy_range.clone() })).unwrap();
         
-        let tu32 = strings.insert_get("u32");
-        m.insert(tu32, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
+        let t = strings.insert_get("u32");
+        m.insert(t, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
             ItemPathSegment {
                 ident: c,
                 ident_token: dummy_range.clone(),
                 generic_args: vec![]
             },
             ItemPathSegment {
-                ident: tu32,
+                ident: t,
                 ident_token: dummy_range.clone(),
                 generic_args: vec![]
             }
         ], global: true }, span: dummy_range.clone() })).unwrap();
-        
+        let t = strings.insert_get("f32");
+        m.insert(t, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
+            ItemPathSegment {
+                ident: c,
+                ident_token: dummy_range.clone(),
+                generic_args: vec![]
+            },
+            ItemPathSegment {
+                ident: t,
+                ident_token: dummy_range.clone(),
+                generic_args: vec![]
+            }
+        ], global: true }, span: dummy_range.clone() })).unwrap();
         
         
         return m;
@@ -177,7 +189,7 @@ impl SymbolTable {
         
         // TODO make declarative macro to help
         t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(Type::Primitive(Primitive::U32)))).unwrap();
-        
+        t.insert(strings.insert_get("f32"), (Visibility::Pub, GlobalItem::Type(Type::Primitive(Primitive::F32)))).unwrap();
         
         
         

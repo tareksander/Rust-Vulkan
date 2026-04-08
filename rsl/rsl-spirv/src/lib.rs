@@ -32,7 +32,14 @@ mod tests {
     #[test]
     fn basic() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code_template = "#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }";
+        let code_template = r"
+        #[compute]
+        fn test(a: *const f32, b: *const f32, c: *mut f32)
+        {
+            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + 100.2;
+        }";
+        
+        
         let mut code = String::new();
         const N: usize = 1;
         for i in 0..N {

@@ -136,6 +136,7 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
         span: TokenRange::point(data.file, data.index),
     };
     let mut attrs = vec![];
+    let mut shader_type = None;
     loop {
         match *data.peek() {
             Token::Keyword(kw) => {
@@ -161,7 +162,7 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                         todo!()
                     },
                     Keyword::Fn => {
-                        match parse_function(data, visibility, None, None, None, &attrs) {
+                        match parse_function(data, visibility, None, shader_type.clone(), None, &attrs) {
                             Ok(f) => {
                                 m.functions.push(f);
                             },
@@ -238,6 +239,44 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                     return m;
                 }
             },
+            Token::Ident(s) => {
+                if shader_type.is_some() {
+                    data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                    .with_message("Expected item, found identifier")
+                    .with_label(Label::new(data.spans[data.index])
+                        .with_message("This token")
+                        .with_color(Color::Red))
+                    .finish());
+                }
+                match s.get(data.strings).as_str() {
+                    "compute" => {
+                        shader_type = Some((ShaderType::Compute, data.take_ident().unwrap().1));
+                    },
+                    "vertex" => {
+                        shader_type = Some((ShaderType::Vertex, data.take_ident().unwrap().1));
+                    },
+                    "fragment" => {
+                        shader_type = Some((ShaderType::Fragment, data.take_ident().unwrap().1));
+                    },
+                    "mesh" => {
+                        shader_type = Some((ShaderType::Mesh, data.take_ident().unwrap().1));
+                    },
+                    "flow" => {
+                        shader_type = Some((ShaderType::Flow, data.take_ident().unwrap().1));
+                    },
+                    "graph" => {
+                        shader_type = Some((ShaderType::Graph, data.take_ident().unwrap().1));
+                    },
+                    _ => {
+                        data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                        .with_message("Expected item, found identifier")
+                        .with_label(Label::new(data.spans[data.index])
+                            .with_message("This token")
+                            .with_color(Color::Red))
+                        .finish());
+                    }
+                }
+            }
             _ => {
                 break;
             }

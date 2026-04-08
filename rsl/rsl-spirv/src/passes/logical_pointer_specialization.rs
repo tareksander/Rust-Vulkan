@@ -89,14 +89,16 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                 rsl_data::internal::ast::BinOp::Add => {
                                     // TODO pointer arithmetic
                                 },
-                                rsl_data::internal::ast::BinOp::Sub => todo!(),
-                                rsl_data::internal::ast::BinOp::Mul => todo!(),
-                                rsl_data::internal::ast::BinOp::Div => todo!(),
-                                rsl_data::internal::ast::BinOp::Mod => todo!(),
+                                rsl_data::internal::ast::BinOp::Sub => {
+                                    // TODO pointer arithmetic
+                                },
+                                rsl_data::internal::ast::BinOp::Mul => {},
+                                rsl_data::internal::ast::BinOp::Div => {},
+                                rsl_data::internal::ast::BinOp::Mod => {},
                                 rsl_data::internal::ast::BinOp::BinAnd => todo!(),
-                                rsl_data::internal::ast::BinOp::LogAnd => todo!(),
+                                rsl_data::internal::ast::BinOp::LogAnd => {},
                                 rsl_data::internal::ast::BinOp::BinOr => todo!(),
-                                rsl_data::internal::ast::BinOp::LogOr => todo!(),
+                                rsl_data::internal::ast::BinOp::LogOr => {},
                                 rsl_data::internal::ast::BinOp::BinXor => todo!(),
                                 rsl_data::internal::ast::BinOp::Index => {
                                     match &mut types.get_mut(lhs).unwrap() {
@@ -132,8 +134,8 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                             }
                         },
                         IRInstruction::Call { func, args, out, span } => todo!(),
-                        IRInstruction::Int { v, id, token_id, ty } => todo!(),
-                        IRInstruction::Float { v, id, token_id, ty } => todo!(),
+                        IRInstruction::Int { v, id, token_id, ty } => {},
+                        IRInstruction::Float { v, id, token_id, ty } => {},
                         IRInstruction::Cast { inp, out, ty } => todo!(),
                         IRInstruction::Spread { inp, out, uni } => todo!(),
                         IRInstruction::ReturnValue { id, token_id } => todo!(),

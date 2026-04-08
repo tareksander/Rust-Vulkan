@@ -36,15 +36,15 @@ int main() {
     bb.bindMemory(mem, size * 4);
     bc.bindMemory(mem, size * 4 * 2);
     
-    auto mapped_memory = (uint32_t*) c.device.mapMemory2(vk::MemoryMapInfo {
+    auto mapped_memory = (float*) c.device.mapMemory2(vk::MemoryMapInfo {
         .memory = mem,
         .offset = 0,
         .size = size * 4 * 3,
     });
     
     for (int i = 0; i < size; i++) {
-        mapped_memory[i] = i;
-        mapped_memory[i + size] = i + 3;
+        mapped_memory[i] = (float)i - 0.5;
+        mapped_memory[i + size] = i % 2 == 0 ? 0.2 : -0.2;
     }
     
     
