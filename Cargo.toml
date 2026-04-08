@@ -5,6 +5,7 @@ resolver = "3"
 
 
 [workspace.dependencies]
+bindgen = "0.72.1"
 
 xml = "1.2.1"
 

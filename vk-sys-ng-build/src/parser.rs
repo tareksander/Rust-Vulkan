@@ -64,7 +64,7 @@ fn parse_registry_element(e: &XMLElement) -> PResult<VKRegistry> {
                         
                     },
                     "types" => {
-                        types = Some(parse_types(c)?);
+                        types = Some(parse_types(c, &mut enums)?);
                     },
                     "enums" => {
                         parse_enums(&mut enums, c);
@@ -499,7 +499,7 @@ fn get_name(e: &XMLElement) -> Option<String> {
     }
     return None;
 }
-fn parse_types(e: &XMLElement) -> PResult<HashMap<String, VKTypeDefinition>> {
+fn parse_types(e: &XMLElement, enums: &mut HashMap<String, VKEnum>) -> PResult<HashMap<String, VKTypeDefinition>> {
     
     fn unwrap_name(types_element: &XMLElement, name: Option<String>) -> String {
         if let Some(name) = name {
@@ -564,7 +564,11 @@ fn parse_types(e: &XMLElement) -> PResult<HashMap<String, VKTypeDefinition>> {
                                         continue;
                                     }
                                     if handle_alias(c, &mut types) {
-                                        
+                                        enums.insert(name, VKEnum { ty: VKEnumType::Bitmask, bitwidth: if c.text().contains("VkFlags64") {
+                                            64
+                                        } else {
+                                            32
+                                        }, variants: vec![] });
                                     }
                                 },
                                 "define" => {
@@ -580,7 +584,7 @@ fn parse_types(e: &XMLElement) -> PResult<HashMap<String, VKTypeDefinition>> {
                                         continue;
                                     }
                                     if handle_alias(c, &mut types) {
-                                        
+                                        enums.insert(name, VKEnum { ty: VKEnumType::Enum, bitwidth: 32, variants: vec![] });
                                     }
                                 },
                                 "funcpointer" => {

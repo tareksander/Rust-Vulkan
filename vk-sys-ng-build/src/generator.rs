@@ -38,7 +38,7 @@ impl CType {
                         out += &v.to_string();
                     },
                 }
-                out += "as usize]";
+                out += " as usize]";
                 out
             },
             CType::Primitive(cprimitive) => {
@@ -69,6 +69,9 @@ impl CType {
 }
 
 fn append_type(name: &String, ty: &VKTypeDefinition, out: &mut String) {
+    if name.starts_with("VkVideo") {
+        return;
+    }
     match &ty.kind {
         VKTypeDefinitionKind::Include(_) => {},
         VKTypeDefinitionKind::Struct(s) => {
@@ -239,7 +242,9 @@ pub fn generate_vk(config: &Config, registry: &VKRegistry) -> String {
     // start with a capacity of 1mb to be sure reallocation isn't going to be too heavy
     let mut out = String::with_capacity(1024 * 1024);
     
+    
     out += "/// Raw Vulkan bindings corresponding exactly to the C definitions.\n";
+    out += "#[allow(non_snake_case)]\n";
     if config.raw_bindings {
         out += "pub ";
     }
@@ -261,6 +266,7 @@ pub fn generate_vk(config: &Config, registry: &VKRegistry) -> String {
     generate_enums(&mut out, registry);
     out += "\n\n";
     for (name, cmd) in &registry.commands {
+        
         match cmd {
             crate::data::VKCmd::Alias(alias) => {
                 out += &format!("pub type PFN_{} = PFN_{};\n\n", name, alias);
