@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rsl_data::internal::{Attribute, Builtin, Mutability, ShaderType, StorageClass, StringTable, ast::TokenRange, ir::{Function, GlobalItem, IRID, IRInstruction, Primitive, SymbolTable, Type}};
+use rsl_data::internal::{Attribute, Builtin, Mutability, ShaderType, StorageClass, StringTable, ast::TokenRange, ir::{Function, GlobalItem, IRID, IRInstruction, Primitive, SymbolID, SymbolTable, Type}};
 use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FunctionControl, MemoryAccess, MemoryModel}};
 
 trait SpirvBuiltin {
@@ -66,7 +66,7 @@ impl<'a> SpirvTypeCache<'a> {
         }
     }
     
-    pub fn spirv_struct(&mut self, b: &mut rspirv::dr::Builder, ty: &[Type]) -> (u32, TypeLayout) {
+    pub fn spirv_struct(&mut self, b: &mut rspirv::dr::Builder, ty: &[Type], block: bool) -> (u32, TypeLayout) {
         if let Some(s) = self.struct_cache.get(ty) {
             return *s;
         }
@@ -76,21 +76,29 @@ impl<'a> SpirvTypeCache<'a> {
         }
         
         let sty = b.type_struct(types);
-        b.decorate(sty, Decoration::Block, []);
-        let mut max_align = 0;
-        let mut offset: u16 = 0;
-        for i in 0..ty.len() {
-            let meta = self.layout(b, &ty[i]);
-            offset = offset.next_multiple_of(meta.alignment);
-            b.member_decorate(sty, i as u32, Decoration::Offset, [Operand::LiteralBit32(offset as u32)]);
-            offset += meta.size;
-            max_align = max_align.max(meta.alignment);
+        let ret;
+        if block {
+            b.decorate(sty, Decoration::Block, []);
+            let mut max_align = 1;
+            let mut offset: u16 = 0;
+            for i in 0..ty.len() {
+                let meta = self.layout(b, &ty[i]);
+                offset = offset.next_multiple_of(meta.alignment);
+                b.member_decorate(sty, i as u32, Decoration::Offset, [Operand::LiteralBit32(offset as u32)]);
+                offset += meta.size;
+                max_align = max_align.max(meta.alignment);
+            }
+            let size = offset.next_multiple_of(max_align);
+            ret = (sty, TypeLayout {
+                alignment: max_align,
+                size,
+            });
+        } else {
+            ret = (sty, TypeLayout {
+                alignment: 1,
+                size: 0,
+            });
         }
-        let size = offset.next_multiple_of(max_align);
-        let ret = (sty, TypeLayout {
-            alignment: max_align,
-            size,
-        });
         self.struct_cache.insert(ty.to_vec(), ret);
         return ret;
     }
@@ -131,6 +139,7 @@ impl<'a> SpirvTypeCache<'a> {
                 TypeLayout { alignment: 8, size: 8 }
             },
             Type::Reference { class, ty, mutability } => todo!(),
+            Type::Function { sym } => todo!(),
         }
     }
     
@@ -187,6 +196,7 @@ impl<'a> SpirvTypeCache<'a> {
             Type::Reference { class, ty, mutability } => todo!(),
             Type::UnresolvedArray { length, ty } => unreachable!(),
             Type::Unresolved(item_path) => unreachable!(),
+            Type::Function { sym } => todo!(),
         };
         self.cache.insert((ty.clone(), block), id);
         
@@ -232,6 +242,7 @@ struct EmitData<'a> {
     builtins: &'a mut HashMap<Builtin, u32>,
     strings: &'a StringTable,
     u32zero: u32,
+    funcs: HashMap<SymbolID, u32>,
 }
 
 impl<'a> EmitData<'a> {
@@ -246,6 +257,7 @@ impl<'a> EmitData<'a> {
             builtins,
             strings,
             u32zero,
+            funcs: HashMap::new(),
         }
     }
     
@@ -253,8 +265,8 @@ impl<'a> EmitData<'a> {
         self.types.get(self.b, ty, block)
     }
     
-    fn spirv_struct(&mut self, ty: &[Type]) -> (u32, TypeLayout) {
-        self.types.spirv_struct(self.b, ty)
+    fn spirv_struct(&mut self, ty: &[Type], block: bool) -> (u32, TypeLayout) {
+        self.types.spirv_struct(self.b, ty, block)
     }
     
     fn layout(&mut self, ty: &Type) -> TypeLayout {
@@ -356,6 +368,15 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
     
     for s in sym.iter() {
         match &sym.get(s).1 {
+            GlobalItem::Function(f) => {
+                d.funcs.insert(s, d.b.id());
+            }
+            _ => {}
+        }
+    }
+    
+    for s in sym.iter() {
+        match &sym.get(s).1 {
             GlobalItem::Static { attrs, ident_token, uni, ty } => {
                 // TODO handle other builtins
                 let mut handle_builtin = |builtin: Builtin| {
@@ -370,16 +391,17 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
                 handle_builtin(Builtin::GlobalInvocationId);
             }
             GlobalItem::Function(f) => {
-                let is_compute_entry = f.attrs.contains(&Attribute::Compute) ;
+                let is_compute_entry = f.attrs.contains(&Attribute::Compute);
                 
-                let id = emit_function(f, &mut d, is_compute_entry);
+                let id = d.funcs[&s];
+                let push_var = emit_function(f, &mut d, is_compute_entry, id);
                 if is_compute_entry {
                     let mut interface = vec![d.builtins[&Builtin::GlobalInvocationId]];
-                    if let Some(push) = id.1 {
+                    if let Some(push) = push_var {
                         interface.push(push);
                     }
-                    d.b.execution_mode(id.0, ExecutionMode::LocalSize, [32, 1, 1]);
-                    d.b.entry_point(ExecutionModel::GLCompute, id.0, "test", interface);
+                    d.b.execution_mode(id, ExecutionMode::LocalSize, [32, 1, 1]);
+                    d.b.entry_point(ExecutionModel::GLCompute, id, "test", interface);
                 }
             }
             
@@ -394,19 +416,30 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
 }
 
 
-fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool) -> (u32, Option<u32>) {
+struct PushData {
+    push_var_id: u32,
+    push_struct_pointer: u32,
+    push_struct: u32,
+    param_struct: u32,
+    param_struct_pointer: u32,
+    param_struct_pointer_push_pointer: u32,
+}
+
+fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool, id: u32) -> Option<u32> {
     let blocks = f.blocks.borrow();
     let types = f.types.borrow();
+    let mut funcs: HashMap<IRID, SymbolID> = HashMap::new();
     
     // TODO remove parameters from function type for entrypoints
     
-    let rty = d.get_type(&f.ret.0, false);
-    let ret_unit = match f.ret.0 {
+    let rty = d.get_type(&f.ret.borrow().0, false);
+    let ret_unit = match f.ret.borrow().0 {
         Type::Primitive(Primitive::Unit) => true,
         _ => false,
     };
     
     let mut param_types_spirv = Vec::with_capacity(f.num_params);
+    let mut param_types_spirv_phyptr = Vec::with_capacity(f.num_params);
     let mut param_types = Vec::with_capacity(f.num_params);
     // let mut param_offsets = Vec::with_capacity(if entrypoint {
     //     f.num_params
@@ -415,14 +448,10 @@ fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool) -> (u32, Opti
     // });
     if f.num_params != 0 {
         for i in 0..f.num_params {
-            let t = match &types[&IRID(i)] {
-                Type::Pointer { class, ty, mutability } => {
-                    param_types.push(ty.clone());
-                    d.get_type(&*ty, entrypoint)
-                }
-                _ => unreachable!()
-            };
-            param_types_spirv.push(t);
+            let ty = &types[&IRID(i)];
+            param_types.push(ty.clone());
+            param_types_spirv.push(d.get_type(ty, entrypoint));
+            param_types_spirv_phyptr.push(d.get_type(&Type::Pointer { class: StorageClass::PhysicalStorage, ty: ty.clone().into(), mutability: Mutability::Mutable }, entrypoint));
         }
     }
     
@@ -432,22 +461,33 @@ fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool) -> (u32, Opti
         d.b.type_function(rty, param_types_spirv.iter().cloned())
     };
     
-    let mut push_var = None;
+    let mut push_data = None;
     let mut idmap: HashMap<IRID, u32> = HashMap::new();
     
     if entrypoint && f.num_params != 0 {
-        let sty = d.b.type_struct(param_types_spirv.iter().cloned());
-        let styp = d.b.type_pointer(None, spirv::StorageClass::PushConstant, sty);
-        let ps = d.b.variable(styp, None, spirv::StorageClass::PushConstant, None);
-        push_var = Some(ps);
-        // TODO proper struct calculation
-        d.b.decorate(sty, Decoration::Block, []);
-        for i in 0..f.num_params {
-            d.b.member_decorate(sty, i as u32, Decoration::Offset, [Operand::LiteralBit32((i*8) as u32)]);
-        }
+        // create a struct from the parameter types
+        let (sty, slayout) = d.spirv_struct(param_types.as_slice(), true);
+        // create a physical pointer to the struct
+        let styp = d.b.type_pointer(None, spirv::StorageClass::PhysicalStorageBuffer, sty);
+        // create a push constant struct with the pointer being the only member
+        let psty = d.b.type_struct([styp]);
+        // Create a push constant pointer to the push constant struct
+        let pstyp = d.b.type_pointer(None, spirv::StorageClass::PushConstant, psty);
+        // Create the push constant pointer variable
+        let ps = d.b.variable(pstyp, None, spirv::StorageClass::PushConstant, None);
+        push_data = Some(PushData {
+            push_var_id: ps,
+            param_struct: sty,
+            param_struct_pointer: styp,
+            push_struct: psty,
+            push_struct_pointer: pstyp,
+            param_struct_pointer_push_pointer: d.b.type_pointer(None, spirv::StorageClass::PushConstant, styp),
+        });
+        d.b.decorate(psty, Decoration::Block, []);
+        d.b.member_decorate(psty, 0, Decoration::Offset, [Operand::LiteralBit32(0)]);
     }
     
-    let fid = d.b.begin_function(rty, None, FunctionControl::empty(), fty).unwrap();
+    let fid = d.b.begin_function(rty, Some(id), FunctionControl::empty(), fty).unwrap();
     let mut blockids = Vec::with_capacity(blocks.len());
     for _ in 0..blocks.len() {
         blockids.push(d.b.id());
@@ -457,37 +497,54 @@ fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool) -> (u32, Opti
     
     for i in 0..blocks.len() {
         d.b.begin_block(Some(blockids[i])).unwrap();
-        let start = if entrypoint && i == 0 && f.num_params != 0 {
+        if entrypoint && i == 0 && f.num_params != 0 {
             let u32t = d.get_type(&Type::Primitive(Primitive::U32), false);
+            let push_data = push_data.as_ref().unwrap();
+            // get a pointer to the push struct pointer
+            let push_struct_pointer_pointer = d.b.access_chain(push_data.param_struct_pointer_push_pointer, None, push_data.push_var_id, [d.u32zero]).unwrap();
+            // load the push struct pointer
+            let push_struct_pointer = d.b.load(push_data.param_struct_pointer, None, push_struct_pointer_pointer, None, []).unwrap();
             for i in 0..f.num_params {
                 let index = d.b.constant_bit32(u32t, i as u32);
-                let ty = d.b.type_pointer(None, spirv::StorageClass::PushConstant, param_types_spirv[i]);
-                idmap.insert(IRID(i), d.b.access_chain(ty, None, push_var.clone().unwrap(), [index]).unwrap());
+                let p = d.b.access_chain(param_types_spirv_phyptr[i], None, push_struct_pointer, [index]).unwrap();
+                idmap.insert(IRID(i), 
+                d.b.load(param_types_spirv[i], None, p, 
+                    Some(MemoryAccess::NON_PRIVATE_POINTER | MemoryAccess::ALIGNED), [Operand::LiteralBit32(8)]).unwrap());
             }
-            f.num_params
         } else {
-            0
-        };
-        for inst in start..blocks[i].instructions.len() {
-            emit_instruction(&blocks[i].instructions[inst], d, &blockids, &mut idmap, &types);
+            for i in 0..f.num_params {
+                idmap.insert(IRID(i), d.b.function_parameter(param_types_spirv[i]).unwrap());
+            }
+        }
+        for inst in 0..blocks[i].instructions.len() {
+            emit_instruction(&blocks[i].instructions[inst], d, &blockids, &mut idmap, &types, &mut funcs);
         }
         if ret_unit {
-            emit_instruction(&IRInstruction::Return { token_id: TokenRange::point(0, 0) }, d, &blockids, &mut idmap, &types);
+            emit_instruction(&IRInstruction::Return { token_id: TokenRange::point(0, 0) }, d, &blockids, &mut idmap, &types, &mut funcs);
         }
     }
     
     
     
     d.b.end_function().unwrap();
-    return (fid, push_var);
+    return push_data.map(|p| p.push_var_id);
 }
 
 
-fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>, idmap: &mut HashMap<IRID, u32>, types: &HashMap<IRID, Type>) {
+fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>, idmap: &mut HashMap<IRID, u32>, types: &HashMap<IRID, Type>, funcs: &mut HashMap<IRID, SymbolID>) {
     match inst {
         IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
             // TODO: for now just insert the invocationid builtin
-            idmap.insert(*id, d.builtins[&Builtin::GlobalInvocationId]);
+            let path = d.sym.follow_imports(*path);
+            if d.strings.lookup(d.sym.get_name(path)) == "::core::globalInvocationID" {
+                idmap.insert(*id, d.builtins[&Builtin::GlobalInvocationId]);
+            }
+            match &d.sym.get(path).1 {
+                GlobalItem::Function(f) => {
+                    funcs.insert(*id, path);
+                }
+                _ => {}
+            }
         },
         IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
             let t = d.get_type(&types[id], false);
@@ -603,16 +660,14 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
             
             if sc != StorageClass::PhysicalStorage {
                 idmap.insert(*out, d.b.load(t, None, idmap[ptr],  if sc == StorageClass::Storage {
-                    let mut a = MemoryAccess::NON_PRIVATE_POINTER;
+                    let a = MemoryAccess::NON_PRIVATE_POINTER;
                     Some(a)
                 } else {
                     None
                 }, []).unwrap());
             } else {
                 idmap.insert(*out, d.b.load(t, None, idmap[ptr],{
-                    // TODO nonprivate pointer x physical storage
-                    let mut a = MemoryAccess::ALIGNED | MemoryAccess::NON_PRIVATE_POINTER;
-                    
+                    let a = MemoryAccess::ALIGNED | MemoryAccess::NON_PRIVATE_POINTER;
                     Some(a)
                 }, [Operand::LiteralBit32(meta.size.next_multiple_of(meta.alignment) as u32)]).unwrap());
             }
@@ -630,15 +685,14 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
             
             if sc != StorageClass::PhysicalStorage {
                 d.b.store(idmap[ptr], idmap[value],   if sc == StorageClass::Storage {
-                    let mut a = MemoryAccess::NON_PRIVATE_POINTER;
+                    let a = MemoryAccess::NON_PRIVATE_POINTER;
                     Some(a)
                 } else {
                     None
                 }, []).unwrap();
             } else {
                 d.b.store(idmap[ptr], idmap[value], {
-                    // TODO nonprivate pointer x physical storage
-                    let mut a = MemoryAccess::ALIGNED | MemoryAccess::NON_PRIVATE_POINTER;
+                    let a = MemoryAccess::ALIGNED | MemoryAccess::NON_PRIVATE_POINTER;
                     
                     Some(a)
                 }, [Operand::LiteralBit32(meta.size.next_multiple_of(meta.alignment) as u32)]).unwrap();
@@ -670,6 +724,7 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                             let u32t = d.get_type(&Type::Primitive(Primitive::U32), false);
                             let index = d.b.constant_bit32(u32t, index);
                             let t = d.get_type(&types[out], false);
+                            println!("{}", d.strings.lookup(name.0));
                             idmap.insert(*out, d.b.access_chain(t, None, idmap[inp], [index]).unwrap());
                         },
                         Type::Matrix { rows, cols, ty } => todo!(),
@@ -678,12 +733,25 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                         Type::RuntimeArray { ty } => todo!(),
                         Type::Pointer { class, ty, mutability } => todo!(),
                         Type::Reference { class, ty, mutability } => todo!(),
+                        Type::Function { sym } => todo!(),
                     }
                 },
                 Type::Reference { class, ty, mutability } => todo!(),
+                Type::Function { sym } => todo!(),
             }
         },
-        IRInstruction::Call { func, args, out, span } => todo!(),
+        IRInstruction::Call { func, args, out, span } => {
+            let f = d.funcs[&funcs[func]];
+            let ty = match &types[out] {
+                Type::Primitive(Primitive::Unit) => {
+                    d.b.type_void()
+                },
+                t => {
+                    d.get_type(&t, false)
+                }
+            };
+            idmap.insert(*out, d.b.function_call(ty, None, f, args.iter().map(|a| idmap[a])).unwrap());
+        },
         IRInstruction::Int { v, id, token_id, ty } => {
             let t = d.get_type(&types[id], false);
             idmap.insert(*id, d.b.constant_bit32(t, *v as u32));
@@ -694,7 +762,9 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
         },
         IRInstruction::Cast { inp, out, ty } => todo!(),
         IRInstruction::Spread { inp, out, uni } => todo!(),
-        IRInstruction::ReturnValue { id, token_id } => todo!(),
+        IRInstruction::ReturnValue { id, token_id } => {
+            d.b.ret_value(idmap[id]).unwrap();
+        },
         IRInstruction::Return { token_id } => {
             d.b.ret().unwrap();
         },

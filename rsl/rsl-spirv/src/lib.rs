@@ -34,10 +34,15 @@ mod tests {
         let strings = StringTable::new();
         let code_template = r"
         #[compute]
-        fn test(a: *const f32, b: *const f32, c: *mut f32)
+        fn test(a: *const f32, b: *const f32, c: *mut f32, f: f32)
         {
-            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + 100.2;
-        }";
+            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + testu(f);
+        }
+        
+        fn testu(a: f32) -> f32 {
+            a * 2.0
+        }
+        ";
         
         
         let mut code = String::new();
@@ -75,18 +80,29 @@ mod tests {
                 toplevel.resolve_paths(&strings);
                 //toplevel.eval_constexprs();
                 
+                for s in toplevel.iter() {
+                    let name = toplevel.get_name(s);
+                    println!("{}", strings.lookup(name));
+                }
+                
+                
+                //println!("{:#?}", toplevel);
                 
                 let t1 = Instant::now();
                 //println!("Time: {} ms", (t1- t0).as_millis());
                 for i in 0..N {
-                    type_checking(&toplevel, &strings, match &toplevel.lookup(&strings.insert_get(&("::test::test".to_string() + &i.to_string()))).unwrap().1 {
+                    type_checking(&toplevel, &strings, match &toplevel.lookup(&strings.insert_get(&(format!("::test::test{}", i)))).unwrap().1 {
+                        GlobalItem::Function(function) => function,
+                        _ => panic!()
+                    });
+                    type_checking(&toplevel, &strings, match &toplevel.lookup(&strings.insert_get(&(format!("::test::test{}u", i)))).unwrap().1 {
                         GlobalItem::Function(function) => function,
                         _ => panic!()
                     });
                 }
                 
                 logical_pointer_specialization(&mut toplevel, &strings);
-                println!("{:#?}", toplevel);
+                //println!("{:#?}", toplevel);
                 fs::write("test.spv", bytemuck::cast_slice(emit_spirv(&mut toplevel, &strings).as_slice())).unwrap();
                 
                 let t2 = Instant::now();

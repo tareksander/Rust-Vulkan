@@ -296,6 +296,7 @@ pub enum Attribute {
     Layout(Layout),
     Builtin(Builtin),
     Compute,
+    Flow,
     Exported,
     Unsafe(UnsafeAttribute),
     Lang(LangAttribute),

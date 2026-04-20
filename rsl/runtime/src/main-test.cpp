@@ -13,33 +13,25 @@ int main() {
     
     const int size = 128;
     auto c = rsl::Context::init();
-    auto ba = c.device.createBuffer(vk::BufferCreateInfo {
+    auto buffer = c.device.createBuffer(vk::BufferCreateInfo {
         .sharingMode = vk::SharingMode::eConcurrent,
         .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
-        .size = size * 4,
-    });
-    auto bb = c.device.createBuffer(vk::BufferCreateInfo {
-        .sharingMode = vk::SharingMode::eConcurrent,
-        .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
-        .size = size * 4,
-    });
-    auto bc = c.device.createBuffer(vk::BufferCreateInfo {
-        .sharingMode = vk::SharingMode::eConcurrent,
-        .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
-        .size = size * 4,
+        .size = size * 4 * 3 + 3 * 8,
     });
     auto mem = c.device.allocateMemory(vk::MemoryAllocateInfo {
         .memoryTypeIndex = c.mem_device_visible_buffer,
-        .allocationSize = size * 4 * 3,
+        .allocationSize = size * 4 * 3 + 3 * 8,
     });
-    ba.bindMemory(mem, 0);
-    bb.bindMemory(mem, size * 4);
-    bc.bindMemory(mem, size * 4 * 2);
+    buffer.bindMemory(mem, 0);
+    auto baddress = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
+        .buffer = buffer
+    });
+    
     
     auto mapped_memory = (float*) c.device.mapMemory2(vk::MemoryMapInfo {
         .memory = mem,
         .offset = 0,
-        .size = size * 4 * 3,
+        .size = VK_WHOLE_SIZE,
     });
     
     for (int i = 0; i < size; i++) {
@@ -47,6 +39,15 @@ int main() {
         mapped_memory[i + size] = i % 2 == 0 ? 0.2 : -0.2;
     }
     
+    auto mpbuffer = (uint64_t*) (((char*) mapped_memory) + size * 4 * 3);
+    auto mpbufferf = (float*) (((char*) mapped_memory) + size * 4 * 3 + 3 * 8);
+    *mpbufferf = 1000.0;
+    
+    mpbuffer[0] = baddress;
+    
+    mpbuffer[1] = baddress + size * 4;
+    
+    mpbuffer[2] = baddress + size * 4 * 2;
     
     
     std::vector<uint32_t> shader_code;
@@ -64,7 +65,7 @@ int main() {
     std::ofstream("test.spv", std::ios::binary).write((char*)shader_code.data(), shader_code.size() * 4);
     auto prange = vk::PushConstantRange {
         .offset = 0,
-        .size = 24,
+        .size = 8,
         .stageFlags = vk::ShaderStageFlagBits::eCompute,
     };
     auto l = c.device.createPipelineLayout(vk::PipelineLayoutCreateInfo {
@@ -100,18 +101,10 @@ int main() {
     
     
     cb.bindPipeline(vk::PipelineBindPoint::eCompute, shader);
-    uint64_t push_data[3];
-    push_data[0] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
-        .buffer = ba
-    });
-    push_data[1] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
-        .buffer = bb
-    });
-    push_data[2] = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
-        .buffer = bc
-    });
+    uint64_t push_data[1];
+    push_data[0] = baddress + size * 4 * 3;
     
-    cb.pushConstants<uint64_t>(l, vk::ShaderStageFlagBits::eCompute, 0, vk::ArrayProxy(3, push_data));
+    cb.pushConstants<uint64_t>(l, vk::ShaderStageFlagBits::eCompute, 0, vk::ArrayProxy(1, push_data));
     
     cb.dispatch(size / 32, 1, 1);
     

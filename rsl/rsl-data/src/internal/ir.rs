@@ -329,6 +329,7 @@ impl SymbolTable {
                 Type::RuntimeArray { ty } => todo!(),
                 Type::Pointer { class, ty, mutability } => resolve_type(table, &mut*ty, m, strings),
                 Type::Reference { class, ty, mutability } => resolve_type(table, &mut*ty, m, strings),
+                Type::Function { sym } => {},
             }
         }
         
@@ -350,7 +351,7 @@ impl SymbolTable {
                 if let Some(s) = table.lookup_id(&p.interned(strings, m)) {
                     sym = Some(s);
                 } else {
-                    panic!()
+                    panic!("could not find symbol: {}", strings.lookup(p.interned(strings, m)));
                 } 
             }
             return sym.unwrap();
@@ -362,7 +363,13 @@ impl SymbolTable {
                 (v, GlobalItem::Function(f)) => {
                     let m = self.mapr[&id].base(strings);
                     let mut blocks = f.blocks.borrow_mut();
-                    // TODO look up types as well, to cover the u32 in the pointers
+                    let mut types = f.types.borrow_mut();
+                    for i in 0..f.num_params {
+                        let t = types.get_mut(&IRID(i)).unwrap();
+                        resolve_type(self, t, m, strings);
+                    }
+                    let mut rt = f.ret.borrow_mut();
+                    resolve_type(self, &mut rt.0, m, strings);
                     for b in blocks.iter_mut() {
                         for inst in &mut b.instructions {
                             match inst {
@@ -446,7 +453,7 @@ pub struct Function {
     pub shader_type: ShaderType,
     //pub params: Vec<(InternedString, TokenRange, Uniformity, Type)>,
     pub num_params: usize,
-    pub ret: (Type, Uniformity),
+    pub ret: RefCell<(Type, Uniformity)>,
     pub blocks: RefCell<Vec<IRBlock>>,
     pub next_id: RefCell<IRID>,
     pub types: RefCell<HashMap<IRID, Type>>,
@@ -455,15 +462,20 @@ pub struct Function {
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Function").field("attrs", &self.attrs).field("ident_token", &self.ident_token).field("shader_type", &self.shader_type).field("num_params", &self.num_params).field("ret", &self.ret)
-        .field("next_id", &self.next_id).finish()?;
+        .field("next_id", &self.next_id).field("params", &(0..self.num_params).map(|i| self.types.borrow()[&IRID(i)].clone()).collect::<Vec<_>>()).finish()?;
         let b = self.blocks.borrow();
         let t = self.types.borrow();
+        
         let mut l = f.debug_list();
         for b in b.iter() {
             for i in &b.instructions {
                 l.entry(&i);
                 let mut print_type = |id: &IRID| {
-                    l.entry(&t[id]);
+                    if let Some(t) = t.get(id) {
+                        l.entry(t);
+                    } else {
+                        l.entry(&"Missing type");
+                    }
                 };
                 match i {
                     IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
@@ -532,6 +544,9 @@ pub enum Type {
         class: StorageClass,
         ty: Box<Type>,
         mutability: Mutability,
+    },
+    Function {
+        sym: SymbolID,
     },
 }
 

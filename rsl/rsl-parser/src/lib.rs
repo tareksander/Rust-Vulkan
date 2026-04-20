@@ -169,6 +169,7 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                             Err(_) => {}
                         }
                         visibility = None;
+                        attrs.clear();
                     },
                     _=> {
                         break;
@@ -211,7 +212,20 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                             data.take();
                             attrs.push(Attribute::Compute);
                         },
-                        
+                        "flow" => {
+                            data.take();
+                            if data.peek() != &Token::Special(Special::SquareBracketClose) {
+                                data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
+                                    .with_message("Invalid token, attribute does not take parameters")
+                                    .with_label(Label::new(data.spans[data.index])
+                                        .with_message("This token")
+                                        .with_color(Color::Red))
+                                    .finish());
+                                return m;
+                            }
+                            data.take();
+                            attrs.push(Attribute::Flow);
+                        }
                         _ => {
                             data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
                                 .with_message("Invalid attribute")
@@ -790,7 +804,12 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                     data.take();
                     match op.0 {
                         Postfix::Call => {
-                            todo!()
+                            let params = parse_delimited(data, parse_expr, Token::Special(Special::Comma), Token::Special(Special::RoundBracketClose)).unwrap();
+                            assert!(data.take() == &Token::Special(Special::RoundBracketClose));
+                            lhs = Expression::Call(match lhs {
+                                Expression::Item(i) => i,
+                                _ => panic!("only directly specified functions can be called")
+                            }, params);
                         },
                     }
                 } else {

@@ -13,10 +13,10 @@ impl SymbolTable {
     pub fn from_module(module: ModuleData, strings: &StringTable) -> SymbolTable {
         let mut s = SymbolTable::new_prelude(strings);
         
+        
         for f in module.functions {
             s.insert(f.ident, function_definition_to_ir(f)).unwrap();
         }
-        
         
         
         
@@ -27,6 +27,12 @@ impl SymbolTable {
     
 }
 
+
+struct Data<'a> {
+    blocks: &'a mut Vec<IRBlock>,
+    id: &'a mut IRID,
+    num_params: usize,
+}
 
 fn type_to_ir(t: ast::Type) -> Option<Type> {
     // TODO What about partly inferred variables like array types?
@@ -52,10 +58,12 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
     
     let is_entrypoint = is_compute_entrypoint;
     
+    let mut types = HashMap::new();
     
     let vis = f.visibility.map(|v| v.0).unwrap_or(Visibility::Priv);
     let ret = (type_to_ir(f.ret.0).unwrap(), f.ret.1.map(|u| u.0).unwrap_or(Uniformity::Inferred));
     let mut params = Vec::with_capacity(f.params.len());
+    
     for p in &f.params {
         params.push((p.0, p.1.clone(), p.2.clone().map(|u| u.0).unwrap_or(if is_entrypoint {
             Uniformity::Dispatch
@@ -63,7 +71,6 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
             Uniformity::Inferred
         }), type_to_ir(p.3.clone()).unwrap()));
     }
-    let num_params = params.len();
     let shader_type = if let Some(t) = f.shader_type {
         t.0
     } else {
@@ -73,30 +80,24 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
             ShaderType::Generic
         }
     };
+    let num_params = params.len();
     let mut locals = HashMap::with_capacity(num_params);
-    let mut blocks = vec![IRBlock { instructions: vec![] }];
-    {
-        let b = blocks.first_mut().unwrap();
-        for (i, p) in params.into_iter().enumerate() {
-            b.instructions.push(IRInstruction::Local {
-                ident: p.0,
-                ident_token: p.1,
-                id: IRID(i),
-                ty: Some(p.3),
-                uni: p.2,
-                mutable: Mutability::Mutable,
-            });
-            locals.insert(p.0, IRID(i));
-        }
+    for i in 0..num_params{
+        types.insert(IRID(i), params[i].3.clone());
+        locals.insert(f.params[i].0, IRID(i));
     }
-    
+    let mut blocks = vec![IRBlock { instructions: vec![] }];
     
     let mut id = IRID(num_params);
     
     let r = f.block.range.clone();
     
-    
-    if let Some(id) = block_to_ir(&mut blocks, f.block, &mut id, locals) {
+    let mut d = Data {
+        blocks: &mut blocks,
+        id: &mut id,
+        num_params,
+    };
+    if let Some(id) = block_to_ir(&mut d, f.block, locals) {
         blocks.last_mut().unwrap().instructions.push(IRInstruction::ReturnValue { id, token_id: r });
     }
     
@@ -106,10 +107,10 @@ fn function_definition_to_ir(f: FunctionDefinition) -> (Visibility, GlobalItem) 
         ident_token: f.ident_token,
         shader_type,
         num_params,
-        ret,
+        ret: ret.into(),
         blocks: RefCell::new(blocks),
         next_id: RefCell::new(id),
-        types: RefCell::new(HashMap::new()),
+        types: RefCell::new(types),
     }));
 }
 
@@ -120,30 +121,30 @@ fn insert(blocks: &mut Vec<IRBlock>, i: IRInstruction) {
 
 
 
-fn block_to_ir(blocks: &mut Vec<IRBlock>, b: Block, id: &mut IRID, mut locals: HashMap<InternedString, IRID>) -> Option<IRID> {
+fn block_to_ir(d: &mut Data, b: Block, mut locals: HashMap<InternedString, IRID>) -> Option<IRID> {
     for s in b.statements {
-        statement_to_blocks(blocks, s, id, &mut locals);
+        statement_to_blocks(d, s, &mut locals);
     }
     if let Some(e) = b.value {
         let range = e.range();
-        let id = expr_to_blocks(blocks, e, false, id, &mut locals);
+        let id = expr_to_blocks(d, e, false, &mut locals);
         return Some(id);
     }
     return None;
 }
 
-fn statement_to_blocks(blocks: &mut Vec<IRBlock>, stm: Statement, id: &mut IRID, locals: &mut HashMap<InternedString, IRID>) {
+fn statement_to_blocks(d: &mut Data, stm: Statement, locals: &mut HashMap<InternedString, IRID>) {
     match stm {
         Statement::Expression(e) => {
-            expr_to_blocks(blocks, e, false, id, locals);
+            expr_to_blocks(d, e, false, locals);
         },
         Statement::Return(r, e) => {
             if let Some(e) = e {
                 let range = r.merge(&e.range());
-                let id = expr_to_blocks(blocks, e, false, id, locals);
-                insert(blocks, IRInstruction::ReturnValue { id, token_id: range });
+                let id = expr_to_blocks(d, e, false, locals);
+                insert(d.blocks, IRInstruction::ReturnValue { id, token_id: range });
             } else {
-                insert(blocks, IRInstruction::Return { token_id: r });
+                insert(d.blocks, IRInstruction::Return { token_id: r });
             }
         },
         Statement::Break { break_token, label, value } => todo!(),
@@ -154,7 +155,7 @@ fn statement_to_blocks(blocks: &mut Vec<IRBlock>, stm: Statement, id: &mut IRID,
 
 /// Converts an expression to blocks in a function, returning the IRID of the value.
 /// If lvalue is true, instead returns a pointer to the place to store a value.
-fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &mut IRID, locals: &mut HashMap<InternedString, IRID>) -> IRID {
+fn expr_to_blocks(d: &mut Data, e: Expression, lvalue: bool, locals: &mut HashMap<InternedString, IRID>) -> IRID {
     let er = e.range();
     match e {
         Expression::Unary { e, op, op_range } => {
@@ -163,11 +164,11 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
                     panic!("Only indexing and dereferencing is an allowed operation for lvalues");
                 }
                 // Since an lvalue should be a pointer, just omit the deref operation. 
-                expr_to_blocks(blocks, *e, lvalue, id, locals)
+                expr_to_blocks(d, *e, lvalue, locals)
             } else {
-                let i = id.next();
-                let inp = expr_to_blocks(blocks, *e, lvalue, id, locals);
-                insert(blocks, IRInstruction::UnOp {
+                let i = d.id.next();
+                let inp = expr_to_blocks(d, *e, lvalue, locals);
+                insert(d.blocks, IRInstruction::UnOp {
                     inp,
                     op,
                     out: i,
@@ -178,18 +179,18 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
         Expression::Binary { lhs, op, rhs } => {
             match op {
                 BinOp::Index => {
-                    let i = id.next();
-                    let lhs = expr_to_blocks(blocks, *lhs, true, id, locals);
-                    let rhs = expr_to_blocks(blocks, *rhs, false, id, locals);
-                    insert(blocks, IRInstruction::BinOp {
+                    let i = d.id.next();
+                    let lhs = expr_to_blocks(d, *lhs, true, locals);
+                    let rhs = expr_to_blocks(d, *rhs, false, locals);
+                    insert(d.blocks, IRInstruction::BinOp {
                         lhs,
                         op,
                         rhs,
                         out: i,
                         span: er });
                     if ! lvalue {
-                        let ni = id.next();
-                        insert(blocks, IRInstruction::Load { ptr: i, out: ni });
+                        let ni = d.id.next();
+                        insert(d.blocks, IRInstruction::Load { ptr: i, out: ni });
                         ni
                     } else {
                         i
@@ -199,21 +200,21 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
                     if lvalue {
                         panic!("Only indexing and dereferencing is an allowed operation for lvalues");
                     }
-                    let i = id.next();
-                    insert(blocks, IRInstruction::Unit { out: i });
-                    let lhs = expr_to_blocks(blocks, *lhs, true, id, locals);
-                    let rhs = expr_to_blocks(blocks, *rhs, false, id, locals);
-                    insert(blocks, IRInstruction::Store { ptr: lhs, value: rhs });
+                    let i = d.id.next();
+                    insert(d.blocks, IRInstruction::Unit { out: i });
+                    let lhs = expr_to_blocks(d, *lhs, true, locals);
+                    let rhs = expr_to_blocks(d, *rhs, false, locals);
+                    insert(d.blocks, IRInstruction::Store { ptr: lhs, value: rhs });
                     i
                 },
                 _ => {
                     if lvalue {
                         panic!("Only indexing and dereferencing is an allowed operation for lvalues");
                     }
-                    let i = id.next();
-                    let lhs = expr_to_blocks(blocks,*lhs, lvalue, id, locals);
-                    let rhs = expr_to_blocks(blocks,*rhs, lvalue, id, locals);
-                    insert(blocks, IRInstruction::BinOp {
+                    let i = d.id.next();
+                    let lhs = expr_to_blocks(d,*lhs, lvalue, locals);
+                    let rhs = expr_to_blocks(d,*rhs, lvalue, locals);
+                    insert(d.blocks, IRInstruction::BinOp {
                         lhs,
                         op,
                         rhs,
@@ -224,16 +225,16 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
             }
         },
         Expression::Property { e, name, name_token } => {
-            let i = id.next();
-            let base = expr_to_blocks(blocks,*e, true, id, locals);
-            insert(blocks, IRInstruction::Property {
+            let i = d.id.next();
+            let base = expr_to_blocks(d,*e, true, locals);
+            insert(d.blocks, IRInstruction::Property {
                 inp: base,
                 name: (name, name_token),
                 out: i
             });
             if ! lvalue {
-                let ni = id.next();
-                insert(blocks, IRInstruction::Load { ptr: i, out: ni });
+                let ni = d.id.next();
+                insert(d.blocks, IRInstruction::Load { ptr: i, out: ni });
                 ni
             } else {
                 i
@@ -242,32 +243,43 @@ fn expr_to_blocks(blocks: &mut Vec<IRBlock>, e: Expression, lvalue: bool, id: &m
         Expression::Item(item_path) => {
             if item_path.global == false && item_path.segments.len() == 1 && item_path.segments[0].generic_args.len() == 0 &&
                let Some(lid) = locals.get(&item_path.segments[0].ident) {
-                let i = id.next();
-                insert(blocks, IRInstruction::Load { ptr: *lid, out: i });
-                i
+                   if lid.0 < d.num_params {
+                    *lid
+                } else {
+                    let i = d.id.next();
+                    insert(d.blocks, IRInstruction::Load { ptr: *lid, out: i });
+                    i
+                }
             } else {
-                let i = id.next();
+                let i = d.id.next();
                 let r = item_path.range();
-                insert(blocks, IRInstruction::Path { path: item_path, tokens: r, id: i, lvalue });
+                insert(d.blocks, IRInstruction::Path { path: item_path, tokens: r, id: i, lvalue });
                 i
             }
         },
-        Expression::Group(expression) => expr_to_blocks(blocks, *expression, lvalue, id, locals),
+        Expression::Group(expression) => expr_to_blocks(d, *expression, lvalue, locals),
         Expression::IntLiteral(v, token_range) => {
-            let i = id.next();
-            insert(blocks, IRInstruction::Int { v, id: i, token_id: token_range, ty: None });
+            let i = d.id.next();
+            insert(d.blocks, IRInstruction::Int { v, id: i, token_id: token_range, ty: None });
             i
         },
         Expression::FloatLiteral(v, token_range) => {
-            let i = id.next();
-            insert(blocks, IRInstruction::Float { v, id: i, token_id: token_range, ty: None });
+            let i = d.id.next();
+            insert(d.blocks, IRInstruction::Float { v, id: i, token_id: token_range, ty: None });
             i
         },
-        Expression::Call(item_path, expressions) => todo!(),
+        Expression::Call(item_path, expressions) => {
+            let fi = d.id.next();
+            insert(d.blocks, IRInstruction::Path { path: item_path.clone(), tokens: item_path.range(), id: fi, lvalue: false });
+            let i = d.id.next();
+            let mut params = expressions.iter().map(|e| expr_to_blocks(d, e.clone(), false, locals)).collect();
+            insert(d.blocks, IRInstruction::Call { func: fi, args: params, out: i, span: item_path.range() });
+            i
+        },
         Expression::If { condition, then, other } => todo!(),
         Expression::Loop { block } => todo!(),
         // TODO replace unwrap with error reporting
-        Expression::Unsafe(block) => block_to_ir(blocks, *block, id, todo!()).unwrap(),
+        Expression::Unsafe(block) => block_to_ir(d, *block, todo!()).unwrap(),
     }
     
     

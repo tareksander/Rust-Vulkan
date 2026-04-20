@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Pointer, usize};
 
 use bitflags::bitflags;
 use rsl_data::internal::{CompilerData, InternedString, Mutability, StorageClass, StringTable, ir::{Function, GlobalItem, IRBlock, IRID, Primitive, SymbolID, SymbolTable, Type}};
+use thiserror::Error;
 
 
 #[derive(Debug, Clone)]
@@ -11,6 +12,7 @@ enum TCType {
     Function {
         sym: SymbolID,
         params: Vec<Type>,
+        ret: Type,
     },
     Number,
     Primitive(Primitive),
@@ -53,12 +55,21 @@ enum TCType {
     TypeVariable(TypeID),
 }
 
+
+#[derive(Error, Debug)]
+enum TCError {
+    #[error("Unknown error: {0}")]
+    Unknown(String),
+    
+}
+
+
 impl TCType {
     
     fn canonicalize(&self, table: &Vec<TCType>) -> TCType {
         match self {
             TCType::Struct(symbol_id) => todo!(),
-            TCType::Function { sym, params } => todo!(),
+            TCType::Function { sym, params , ret} => self.clone(),
             TCType::Number => TCType::Primitive(Primitive::I32),
             TCType::Primitive(primitive) => self.clone(),
             TCType::Vector { components, ty } => TCType::Vector { components: *components, ty: Box::new(ty.canonicalize(table)) },
@@ -81,7 +92,7 @@ impl TCType {
     fn to_ir_type(&self) -> Type {
         match self {
             TCType::Struct(symbol_id) => todo!(),
-            TCType::Function { sym, params } => todo!(),
+            TCType::Function { sym, params , ret} => Type::Function { sym: *sym },
             TCType::Number => todo!(),
             TCType::Primitive(primitive) => Type::Primitive(*primitive),
             TCType::Vector { components, ty } => {
@@ -107,13 +118,13 @@ impl TCType {
         }
     }
     
-    fn unify_var_val(data: &mut TCData, var: TypeID, val: &TCType) -> Result<TCType, ()> {
+    fn unify_var_val(data: &mut TCData, var: TypeID, val: &TCType) -> Result<TCType, TCError> {
         let t = data.type_vars[var.0 as usize].clone();
         data.type_vars[var.0 as usize] = Self::unify_val_val(data, &t, val)?;
         return Ok(TCType::TypeVariable(var));
     }
     
-    fn unify_var_var(data: &mut TCData, v1: TypeID, v2: TypeID) -> Result<TCType, ()> {
+    fn unify_var_var(data: &mut TCData, v1: TypeID, v2: TypeID) -> Result<TCType, TCError> {
         let t1 = data.type_vars[v1.0 as usize].clone();
         let t2 = data.type_vars[v2.0 as usize].clone();
         let t = Self::unify_val_val(data, &t1, &t2)?;
@@ -122,7 +133,7 @@ impl TCType {
         return Ok(TCType::TypeVariable(v1));
     }
     
-    fn unify_val_val(data: &mut TCData, v1: &TCType, v2: &TCType) -> Result<TCType, ()> {
+    fn unify_val_val(data: &mut TCData, v1: &TCType, v2: &TCType) -> Result<TCType, TCError> {
         Ok(match (v1, v2) {
             (TCType::TypeVariable(v1), TCType::TypeVariable(v2)) => Self::unify_var_var(data, *v1, *v2)?,
             
@@ -153,12 +164,11 @@ impl TCType {
                             }
                             break 'a;
                         } 
-                        panic!("Pointer storage classes don't match");
-                        return Err(());
+                        return Err(TCError::Unknown("Pointer storage classes don't match".to_string()));
                     }
                 }
                 // TODO mutability
-                let t = Self::unify_val_val(data, ty1, ty2).unwrap();
+                let t = Self::unify_val_val(data, ty1, ty2)?;
                 TCType::Pointer { class: c, ty: Box::new(t), mutability: *m1 }
             }
             
@@ -167,7 +177,7 @@ impl TCType {
                 if *p1 == *p2 {
                     v1.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitives: {:#?}, {:#?}", *p1, *p2)));
                 }
             }
             
@@ -183,7 +193,7 @@ impl TCType {
                 if p.is_number() {
                     v2.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitives wit number: {:#?}", *p)));
                 }
             },
             (TCType::Primitive(p), TCType::Number) => Self::unify_val_val(data, v2, v1)?,
@@ -192,7 +202,7 @@ impl TCType {
                 if p.is_int() {
                     v2.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitive with int: {:#?}", *p)));
                 }
             },
             (TCType::Primitive(p), TCType::Int) => Self::unify_val_val(data, v2, v1)?,
@@ -201,7 +211,7 @@ impl TCType {
                 if p.is_uint() {
                     v2.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitive with uint: {:#?}", *p)));
                 }
             },
             (TCType::Primitive(p), TCType::UInt) => Self::unify_val_val(data, v2, v1)?,
@@ -210,7 +220,7 @@ impl TCType {
                 if p.is_sint() {
                     v2.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitive with sint: {:#?}", *p)));
                 }
             },
             (TCType::Primitive(p), TCType::SInt) => Self::unify_val_val(data, v2, v1)?,
@@ -219,7 +229,7 @@ impl TCType {
                 if p.is_float() {
                     v2.clone()
                 } else {
-                    return Err(());
+                    return Err(TCError::Unknown(format!("Incompatible primitive with float: {:#?}", *p)));
                 }
             },
             (TCType::Primitive(p), TCType::Float) => Self::unify_val_val(data, v2, v1)?,
@@ -286,6 +296,7 @@ enum TypeConstraint {
     MutRefOf(TypeID, TypeID),
     VecOrStruct(TypeID),
     MemberOf(TypeID, TypeID, InternedString),
+    Function(TypeID),
 }
 
 
@@ -298,6 +309,7 @@ struct TCData<'a> {
     reverse_type_table: HashMap<TypeID, IRID>,
     tc_type_table: HashMap<IRID, TypeID>,
     constraints: Vec<TypeConstraint>,
+    ret_type: TypeID,
 }
 
 impl<'a> TCData<'a> {
@@ -321,6 +333,7 @@ impl<'a> TCData<'a> {
 pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Function) {
     let ir = function.blocks.borrow_mut();
     let mut table = function.types.borrow_mut();
+    let ret_type = to_tctype(symbols, &function.ret.borrow().0);
     let mut d = TCData {
         symbols,
         strings,
@@ -329,7 +342,12 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
         tc_type_table: HashMap::new(),
         type_vars: vec![],
         constraints: vec![],
+        ret_type: TypeID(0),
     };
+    d.ret_type = d.new_free_type(ret_type);
+    for i in 0..function.num_params {
+        d.new_ir_type(IRID(i), to_tctype(d.symbols, &d.type_table[&IRID(i)]));
+    }
     for b in ir.iter() {
         type_check_block(&mut d, b, symbols);
     }
@@ -460,7 +478,7 @@ fn lookup_type(symbols: &SymbolTable, ty: SymbolID) -> TCType {
 
 fn to_tctype(symbols: &SymbolTable, ty: &Type) -> TCType {
     match ty {
-        Type::Unresolved(item_path) => todo!(),
+        Type::Unresolved(item_path) => panic!("Unresolved path: {:#?}", item_path),
         Type::Resolved(symbol_id) => lookup_type(symbols, *symbol_id),
         Type::Primitive(primitive) => TCType::Primitive(*primitive),
         Type::Vector { components, ty } => TCType::Vector { components: Some(*components), ty: Box::new(TCType::Primitive(*ty)) },
@@ -470,6 +488,7 @@ fn to_tctype(symbols: &SymbolTable, ty: &Type) -> TCType {
         Type::RuntimeArray { ty } => todo!(),
         Type::Pointer { class, ty, mutability } => TCType::Pointer { class: *class, ty: Box::new(to_tctype(symbols, &*ty)), mutability: Some(*mutability) },
         Type::Reference { class, ty, mutability } => todo!(),
+        Type::Function { sym } => to_tctype(symbols, &Type::Resolved(*sym)),
     }
 }
 
@@ -490,7 +509,10 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                         data.new_ir_type(*id, tct);
                     },
                     rsl_data::internal::ir::GlobalItem::FunctionTemplate { args, constraints } => todo!(),
-                    rsl_data::internal::ir::GlobalItem::Function(function) => todo!(),
+                    rsl_data::internal::ir::GlobalItem::Function(function) => {
+                        let fty = function.types.borrow();
+                        data.new_ir_type(*id, TCType::Function { sym: *path, params: (0..function.num_params).map(|i| fty[&IRID(i)].clone()).collect(), ret: function.ret.borrow().0.clone()});
+                    },
                     rsl_data::internal::ir::GlobalItem::Import { path, span } => todo!(),
                     rsl_data::internal::ir::GlobalItem::ResolvedImport { path, id } => todo!(),
                     rsl_data::internal::ir::GlobalItem::Placeholder => todo!(),
@@ -563,7 +585,20 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 let mty = data.new_ir_type(*out, TCType::Unknown);
                 data.constraints.push(TypeConstraint::MemberOf(pt, mty, name.0));
             },
-            rsl_data::internal::ir::IRInstruction::Call { func, args, out, span } => todo!(),
+            rsl_data::internal::ir::IRInstruction::Call { func, args, out, span } => {
+                let (sym, params, ret) = match &data.type_vars[data.tc_type_table[func].0 as usize] {
+                    TCType::Function { sym, params , ret} => (sym, params, ret),
+                    _ => panic!("call id is not a function")
+                };
+                let args = args.clone();
+                let params = params.clone();
+                let ret = ret.clone();
+                data.new_ir_type(*out, to_tctype(symbols, &ret));
+                for (a, p) in args.iter().zip(params) {
+                    let pt = data.new_free_type(to_tctype(symbols, &p));
+                    data.constraints.push(TypeConstraint::Same(data.tc_type_table[a], pt));
+                }
+            },
             rsl_data::internal::ir::IRInstruction::Int { v, id, token_id, ty } => {
                 data.new_ir_type(*id, TCType::Int);
             },
@@ -572,7 +607,9 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
             },
             rsl_data::internal::ir::IRInstruction::Cast { inp, out, ty } => todo!(),
             rsl_data::internal::ir::IRInstruction::Spread { inp, out, uni } => todo!(),
-            rsl_data::internal::ir::IRInstruction::ReturnValue { id, token_id } => todo!(),
+            rsl_data::internal::ir::IRInstruction::ReturnValue { id, token_id } => {
+                data.constraints.push(TypeConstraint::Same(data.tc_type_table[id], data.ret_type));
+            },
             rsl_data::internal::ir::IRInstruction::Return { token_id } => {},
             rsl_data::internal::ir::IRInstruction::Loop { header, body, cont, merge, construct } => todo!(),
             rsl_data::internal::ir::IRInstruction::Branch { target_block } => {},

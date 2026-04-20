@@ -9,7 +9,7 @@ bitflags.workspace = true
 hashbrown.workspace = true
 ariadne.workspace = true
 ena.workspace = true
-
+thiserror.workspace = true
 
 
 
