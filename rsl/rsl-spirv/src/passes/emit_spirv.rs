@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rsl_data::internal::{Attribute, Builtin, Mutability, ShaderType, StorageClass, StringTable, ast::TokenRange, ir::{Function, GlobalItem, IRID, IRInstruction, Primitive, SymbolID, SymbolTable, Type}};
-use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FunctionControl, MemoryAccess, MemoryModel}};
+use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FPFastMathMode, FunctionControl, MemoryAccess, MemoryModel}};
 
 trait SpirvBuiltin {
     fn spirv(&self) -> rspirv::spirv::BuiltIn;
@@ -243,6 +243,7 @@ struct EmitData<'a> {
     strings: &'a StringTable,
     u32zero: u32,
     funcs: HashMap<SymbolID, u32>,
+    fpflags: u32,
 }
 
 impl<'a> EmitData<'a> {
@@ -250,6 +251,7 @@ impl<'a> EmitData<'a> {
     fn new(b: &'a mut rspirv::dr::Builder, sym: &'a SymbolTable, types: &'a mut SpirvTypeCache<'a>, builtins:&'a mut HashMap<Builtin, u32>, strings: &'a StringTable ) -> Self {
         let u32t = types.get(b, &Type::Primitive(Primitive::U32), false);
         let u32zero = b.constant_bit32(u32t, 0);
+        let fpflags = b.constant_bit32(u32t, (FPFastMathMode::NSZ).bits());
         EmitData {
             b,
             sym,
@@ -258,6 +260,7 @@ impl<'a> EmitData<'a> {
             strings,
             u32zero,
             funcs: HashMap::new(),
+            fpflags
         }
     }
     
@@ -292,6 +295,9 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.extension("SPV_KHR_workgroup_memory_explicit_layout");
         b.extension("SPV_KHR_untyped_pointers");
         b.extension("SPV_KHR_float_controls2");
+        b.extension("SPV_KHR_float_controls");
+        b.extension("SPV_EXT_shader_image_int64");
+        
         //b.extension("SPV_KHR_compute_shader_derivatives");
         //b.extension("SPV_KHR_quad_control");
         //b.extension("SPV_KHR_shader_clock");
@@ -310,6 +316,7 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::StorageImageExtendedFormats);
         b.capability(Capability::ImageQuery);
         
+        b.capability(Capability::RoundingModeRTE);
         
         b.capability(Capability::VulkanMemoryModel);
         b.capability(Capability::PhysicalStorageBufferAddresses);
@@ -320,9 +327,12 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::UntypedPointersKHR);
         b.capability(Capability::FloatControls2);
         
+        b.capability(Capability::Int64Atomics);
+        b.capability(Capability::Int64);
         b.capability(Capability::Int16);
         b.capability(Capability::Int8);
         b.capability(Capability::Float16);
+        b.capability(Capability::Float64);
         
         b.capability(Capability::GroupNonUniform);
         b.capability(Capability::GroupNonUniformArithmetic);
@@ -337,6 +347,9 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
         b.capability(Capability::WorkgroupMemoryExplicitLayout8BitAccessKHR);
         b.capability(Capability::UniformAndStorageBuffer16BitAccess);
         b.capability(Capability::UniformAndStorageBuffer8BitAccess);
+        b.capability(Capability::StorageBuffer16BitAccess);
+        b.capability(Capability::StorageBuffer8BitAccess);
+        
         // b.capability(Capability::StoragePushConstant16);
         // b.capability(Capability::StoragePushConstant8);
         // b.capability(Capability::StorageInputOutput16);
@@ -401,6 +414,22 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
                         interface.push(push);
                     }
                     d.b.execution_mode(id, ExecutionMode::LocalSize, [32, 1, 1]);
+                    
+                    d.b.execution_mode(id, ExecutionMode::RoundingModeRTE, [64]);
+                    d.b.execution_mode(id, ExecutionMode::RoundingModeRTE, [32]);
+                    d.b.execution_mode(id, ExecutionMode::RoundingModeRTE, [16]);
+                    
+                    
+                    let f16t = d.get_type(&Type::Primitive(Primitive::F16), false);
+                    let f32t = d.get_type(&Type::Primitive(Primitive::F32), false);
+                    let f64t = d.get_type(&Type::Primitive(Primitive::F64), false);
+                    
+                    d.b.execution_mode_id(id, ExecutionMode::FPFastMathDefault, [f16t, d.fpflags]);
+                    d.b.execution_mode_id(id, ExecutionMode::FPFastMathDefault, [f32t, d.fpflags]);
+                    d.b.execution_mode_id(id, ExecutionMode::FPFastMathDefault, [f64t, d.fpflags]);
+                    
+                    d.b.execution_mode(id, ExecutionMode::MaximallyReconvergesKHR, []);
+                    
                     d.b.entry_point(ExecutionModel::GLCompute, id, "test", interface);
                 }
             }

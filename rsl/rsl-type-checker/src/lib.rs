@@ -531,7 +531,14 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                     data.new_ir_type(*id, TCType::Pointer{ class: StorageClass::Logical, ty: Box::new(TCType::Unknown), mutability: None});
                 }
             },
-            rsl_data::internal::ir::IRInstruction::UnOp { inp, op, out, span } => todo!(),
+            rsl_data::internal::ir::IRInstruction::UnOp { inp, op, out, span } => {
+                match *op {
+                    rsl_data::internal::ast::UnOp::Deref => {
+                        todo!()
+                    }
+                    _ => todo!("{:#?}", op)
+                }
+            },
             rsl_data::internal::ir::IRInstruction::BinOp { lhs, op, rhs, out, span } => {
                 let lhsty = data.tc_type_table[lhs];
                 let rhsty = data.tc_type_table[rhs];

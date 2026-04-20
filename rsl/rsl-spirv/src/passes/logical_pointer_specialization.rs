@@ -200,7 +200,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                             IRInstruction::Float { v, id, token_id, ty } => {},
                             IRInstruction::Cast { inp, out, ty } => todo!(),
                             IRInstruction::Spread { inp, out, uni } => todo!(),
-                            IRInstruction::ReturnValue { id, token_id } => todo!(),
+                            IRInstruction::ReturnValue { id, token_id } => {},
                             IRInstruction::Loop { header, body, cont, merge, construct } => todo!(),
                             IRInstruction::Branch { target_block } => todo!(),
                             IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => todo!(),

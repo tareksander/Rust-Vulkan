@@ -36,11 +36,11 @@ mod tests {
         #[compute]
         fn test(a: *const f32, b: *const f32, c: *mut f32, f: f32)
         {
-            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + testu(f);
+            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + testu(&a[globalInvocationID.x]);
         }
         
-        fn testu(a: f32) -> f32 {
-            a * 2.0
+        fn testu(a: *const f32) -> f32 {
+            *a * 2.0
         }
         ";
         

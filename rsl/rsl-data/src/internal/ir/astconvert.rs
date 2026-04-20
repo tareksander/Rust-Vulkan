@@ -160,20 +160,45 @@ fn expr_to_blocks(d: &mut Data, e: Expression, lvalue: bool, locals: &mut HashMa
     match e {
         Expression::Unary { e, op, op_range } => {
             if lvalue {
-                if op != UnOp::Deref {
-                    panic!("Only indexing and dereferencing is an allowed operation for lvalues");
+                if op != UnOp::Ref && op != UnOp::Ref {
+                    panic!("Only indexing and de/referencing is an allowed operation for lvalues");
                 }
-                // Since an lvalue should be a pointer, just omit the deref operation. 
-                expr_to_blocks(d, *e, lvalue, locals)
+                if op == UnOp::Deref {
+                    let i = d.id.next();
+                    let inp = expr_to_blocks(d, *e, lvalue, locals);
+                    insert(d.blocks, IRInstruction::Load {
+                        ptr: inp,
+                        out: i
+                    });
+                    i
+                } else {
+                    // Since an lvalue should be a pointer, just omit the ref operation. 
+                    expr_to_blocks(d, *e, lvalue, locals)
+                }
+                
             } else {
-                let i = d.id.next();
-                let inp = expr_to_blocks(d, *e, lvalue, locals);
-                insert(d.blocks, IRInstruction::UnOp {
-                    inp,
-                    op,
-                    out: i,
-                    span: er });
-                i
+                if op == UnOp::Deref {
+                    let i = d.id.next();
+                    let inp = expr_to_blocks(d, *e, false, locals);
+                    insert(d.blocks, IRInstruction::Load {
+                        ptr: inp,
+                        out: i
+                    });
+                    i
+                } else {
+                    if op == UnOp::Ref {
+                        expr_to_blocks(d, *e, true, locals)
+                    } else {
+                        let i = d.id.next();
+                        let inp = expr_to_blocks(d, *e, lvalue, locals);
+                        insert(d.blocks, IRInstruction::UnOp {
+                            inp,
+                            op,
+                            out: i,
+                            span: er });
+                            i
+                    }
+                }
             }
         },
         Expression::Binary { lhs, op, rhs } => {

@@ -115,7 +115,7 @@ pub fn parse_file(tokens: &[Token], spans: &[SourceSpan], file: usize, attrs: Ve
 fn parse_module_file(data: &mut ParserData, mut attrs: Vec<Attribute>) -> ModuleData {
     assert!(*data.take() == Token::Start);
     let m = parse_module(data, &mut attrs, true);
-    assert!(*data.take() == Token::End);
+    //assert!(*data.take() == Token::End);
     return m;
 }
 
@@ -288,6 +288,7 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                             .with_message("This token")
                             .with_color(Color::Red))
                         .finish());
+                        return m;
                     }
                 }
             }
@@ -663,8 +664,8 @@ static PREFIX_OPS: LazyLock<HashMap<Token, (UnOp, u16)>> = LazyLock::new(|| {
     m.insert(Token::Special(Special::Exclamation), (UnOp::LogNot, 10));
     m.insert(Token::Special(Special::Minus), (UnOp::Negate, 104));
     m.insert(Token::Special(Special::Tilde), (UnOp::BinNot, 105));
-    m.insert(Token::Special(Special::Star), (UnOp::Deref, 99));
-    m.insert(Token::Special(Special::And), (UnOp::Ref, 98));
+    m.insert(Token::Special(Special::Star), (UnOp::Deref, 900));
+    m.insert(Token::Special(Special::And), (UnOp::Ref, 900));
     return m;
 });
 
