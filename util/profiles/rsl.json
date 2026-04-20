@@ -8,7 +8,9 @@
                 "VK_KHR_maintenance9": 1,
                 "VK_KHR_pipeline_binary": 1,
                 "VK_KHR_shader_maximal_reconvergence": 1,
-                "VK_EXT_device_generated_commands": 1
+                "VK_EXT_device_generated_commands": 1,
+                "VK_KHR_workgroup_memory_explicit_layout": 1,
+                "VK_EXT_shader_image_atomic_int64": 1
             },
             "features": {
                 "VkPhysicalDeviceFeatures": {
@@ -24,7 +26,9 @@
                     "samplerAnisotropy": true,
                     "shaderStorageImageExtendedFormats": true,
                     "shaderImageGatherExtended": true,
-                    "sampleRateShading": true
+                    "sampleRateShading": true,
+                    "shaderInt64": true,
+                    "shaderFloat64": true
                 },
                 "VkPhysicalDeviceVulkan11Features": {
                     "shaderDrawParameters": true,
@@ -35,6 +39,11 @@
                 },
                 "VkPhysicalDeviceVulkan12Features": {
                     "vulkanMemoryModel": true,
+                    "vulkanMemoryModelDeviceScope": true,
+                    "shaderBufferInt64Atomics": true,
+                    "shaderSharedInt64Atomics": true,
+                    "shaderSubgroupExtendedTypes": true,
+                    "subgroupBroadcastDynamicId": true,
                     "bufferDeviceAddress": true,
                     "runtimeDescriptorArray": true,
                     "descriptorIndexing": true,
@@ -90,6 +99,15 @@
                 },
                 "VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT": {
                     "deviceGeneratedCommands": true
+                },
+                "VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR": {
+                    "workgroupMemoryExplicitLayout": true,
+                    "workgroupMemoryExplicitLayoutScalarBlockLayout": true,
+                    "workgroupMemoryExplicitLayout16BitAccess": true,
+                    "workgroupMemoryExplicitLayout8BitAccess": true
+                },
+                "VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT": {
+                    "shaderImageInt64Atomics": true
                 }
             },
             "properties": {
@@ -105,6 +123,11 @@
                         "VK_SUBGROUP_FEATURE_SHUFFLE_BIT",
                         "VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT"
                     ]
+                },
+                "VkPhysicalDeviceVulkan12Properties": {
+                    "shaderRoundingModeRTEFloat16": true,
+                    "shaderRoundingModeRTEFloat32": true,
+                    "shaderRoundingModeRTEFloat64": true
                 },
                 "VkPhysicalDeviceVulkan14Properties": {
                     "dynamicRenderingLocalReadDepthStencilAttachments": true
