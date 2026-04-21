@@ -84,6 +84,8 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         keywords.insert("unsafe", Unsafe);
         keywords.insert("where", Where);
         keywords.insert("type", Type);
+        keywords.insert("if", If);
+        keywords.insert("else", Else);
     }
     
     let mut special = HashMap::new();
@@ -107,8 +109,8 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
         special.insert('~', Tilde);
         special.insert('.', Dot);
         special.insert(',', Comma);
-        special.insert('<', AngleBracketOpen);
-        special.insert('>', AngleBracketClose);
+        special.insert('<', Less);
+        special.insert('>', Greater);
         special.insert('|', Bar);
         special.insert('&', And);
         special.insert('=', Equals);
@@ -261,6 +263,20 @@ pub fn tokenize<'a>(code: &'a str, file: usize, strings: &StringTable) -> Result
                             break 'b;
                         }
                     }
+                }
+                if (c == '<' || c == '>' || c == '!') && let Some(c2) = ascii_char_at(i.get()+1)? && c2 == '=' {
+                    i.set(i.get()+2);
+                    spans.borrow_mut().push(SourceSpan { file, start, end: i.get() });
+                    if c == '<' {
+                        tokens.borrow_mut().push(Token::Special(Special::LessEquals));
+                    }
+                    if c == '>' {
+                        tokens.borrow_mut().push(Token::Special(Special::Greater));
+                    }
+                    if c == '!' {
+                        tokens.borrow_mut().push(Token::Special(Special::ExclamationEquals));
+                    }
+                    break 'b;
                 }
                 if special_double.contains_key(&c) {
                     if let Some(c2) = ascii_char_at(i.get()+1)? {

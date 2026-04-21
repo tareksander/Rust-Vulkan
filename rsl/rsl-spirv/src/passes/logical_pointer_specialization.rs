@@ -145,12 +145,12 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                         }
                                     },
                                     rsl_data::internal::ast::BinOp::Assign => todo!(),
-                                    rsl_data::internal::ast::BinOp::Equals => todo!(),
-                                    rsl_data::internal::ast::BinOp::NotEquals => todo!(),
-                                    rsl_data::internal::ast::BinOp::Less => todo!(),
-                                    rsl_data::internal::ast::BinOp::LessEquals => todo!(),
-                                    rsl_data::internal::ast::BinOp::Greater => todo!(),
-                                    rsl_data::internal::ast::BinOp::GreaterEquals => todo!(),
+                                    rsl_data::internal::ast::BinOp::Equals => {},
+                                    rsl_data::internal::ast::BinOp::NotEquals => {},
+                                    rsl_data::internal::ast::BinOp::Less => {},
+                                    rsl_data::internal::ast::BinOp::LessEquals => {},
+                                    rsl_data::internal::ast::BinOp::Greater => {},
+                                    rsl_data::internal::ast::BinOp::GreaterEquals => {},
                                 }
                             },
                             IRInstruction::Property { inp, name, out } => {
@@ -202,8 +202,8 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                             IRInstruction::Spread { inp, out, uni } => todo!(),
                             IRInstruction::ReturnValue { id, token_id } => {},
                             IRInstruction::Loop { header, body, cont, merge, construct } => todo!(),
-                            IRInstruction::Branch { target_block } => todo!(),
-                            IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => todo!(),
+                            IRInstruction::Branch { target_block } => {},
+                            IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => {},
                             IRInstruction::Phi { out, sources } => todo!(),
                             _ => {}
                         }

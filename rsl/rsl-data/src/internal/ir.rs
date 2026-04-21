@@ -467,7 +467,8 @@ impl Debug for Function {
         let t = self.types.borrow();
         
         let mut l = f.debug_list();
-        for b in b.iter() {
+        for (bi, b) in b.iter().enumerate() {
+            l.entry(&format!("Block {}", bi));
             for i in &b.instructions {
                 l.entry(&i);
                 let mut print_type = |id: &IRID| {

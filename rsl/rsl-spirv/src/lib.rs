@@ -37,6 +37,9 @@ mod tests {
         fn test(a: *const f32, b: *const f32, c: *mut f32, f: f32)
         {
             c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + testu(&a[globalInvocationID.x]);
+            if c[globalInvocationID.x] < 100 {
+                c[globalInvocationID.x] = 100;
+            }
         }
         
         fn testu(a: *const f32) -> f32 {

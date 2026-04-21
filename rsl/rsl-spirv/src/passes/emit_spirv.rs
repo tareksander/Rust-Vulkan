@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use rsl_data::internal::{Attribute, Builtin, Mutability, ShaderType, StorageClass, StringTable, ast::TokenRange, ir::{Function, GlobalItem, IRID, IRInstruction, Primitive, SymbolID, SymbolTable, Type}};
-use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FPFastMathMode, FunctionControl, MemoryAccess, MemoryModel}};
+use rspirv::{binary::Assemble, dr::Operand, spirv::{self, AddressingModel, Capability, Decoration, ExecutionMode, ExecutionModel, FPFastMathMode, FunctionControl, MemoryAccess, MemoryModel, SelectionControl}};
 
 trait SpirvBuiltin {
     fn spirv(&self) -> rspirv::spirv::BuiltIn;
@@ -526,29 +526,31 @@ fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool, id: u32) -> O
     
     for i in 0..blocks.len() {
         d.b.begin_block(Some(blockids[i])).unwrap();
-        if entrypoint && i == 0 && f.num_params != 0 {
-            let u32t = d.get_type(&Type::Primitive(Primitive::U32), false);
-            let push_data = push_data.as_ref().unwrap();
-            // get a pointer to the push struct pointer
-            let push_struct_pointer_pointer = d.b.access_chain(push_data.param_struct_pointer_push_pointer, None, push_data.push_var_id, [d.u32zero]).unwrap();
-            // load the push struct pointer
-            let push_struct_pointer = d.b.load(push_data.param_struct_pointer, None, push_struct_pointer_pointer, None, []).unwrap();
-            for i in 0..f.num_params {
-                let index = d.b.constant_bit32(u32t, i as u32);
-                let p = d.b.access_chain(param_types_spirv_phyptr[i], None, push_struct_pointer, [index]).unwrap();
-                idmap.insert(IRID(i), 
-                d.b.load(param_types_spirv[i], None, p, 
-                    Some(MemoryAccess::NON_PRIVATE_POINTER | MemoryAccess::ALIGNED), [Operand::LiteralBit32(8)]).unwrap());
-            }
-        } else {
-            for i in 0..f.num_params {
-                idmap.insert(IRID(i), d.b.function_parameter(param_types_spirv[i]).unwrap());
+        if i == 0 {
+            if f.num_params != 0 && entrypoint {
+                let u32t = d.get_type(&Type::Primitive(Primitive::U32), false);
+                let push_data = push_data.as_ref().unwrap();
+                // get a pointer to the push struct pointer
+                let push_struct_pointer_pointer = d.b.access_chain(push_data.param_struct_pointer_push_pointer, None, push_data.push_var_id, [d.u32zero]).unwrap();
+                // load the push struct pointer
+                let push_struct_pointer = d.b.load(push_data.param_struct_pointer, None, push_struct_pointer_pointer, None, []).unwrap();
+                for i in 0..f.num_params {
+                    let index = d.b.constant_bit32(u32t, i as u32);
+                    let p = d.b.access_chain(param_types_spirv_phyptr[i], None, push_struct_pointer, [index]).unwrap();
+                    idmap.insert(IRID(i), 
+                    d.b.load(param_types_spirv[i], None, p, 
+                        Some(MemoryAccess::NON_PRIVATE_POINTER | MemoryAccess::ALIGNED), [Operand::LiteralBit32(8)]).unwrap());
+                }
+            } else {
+                for i in 0..f.num_params {
+                    idmap.insert(IRID(i), d.b.function_parameter(param_types_spirv[i]).unwrap());
+                }
             }
         }
         for inst in 0..blocks[i].instructions.len() {
             emit_instruction(&blocks[i].instructions[inst], d, &blockids, &mut idmap, &types, &mut funcs);
         }
-        if ret_unit {
+        if i == blocks.len()-1 && ret_unit {
             emit_instruction(&IRInstruction::Return { token_id: TokenRange::point(0, 0) }, d, &blockids, &mut idmap, &types, &mut funcs);
         }
     }
@@ -587,6 +589,7 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                     idmap.insert(*out, d.b.$op(t, None, idmap[lhs], idmap[rhs]).unwrap());
                 };
             }
+            let boolt = d.get_type(&Type::Primitive(Primitive::Bool), false);
             match op {
                 rsl_data::internal::ast::BinOp::Add => {
                     if let Type::Primitive(p) = &types[out] {
@@ -646,9 +649,13 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                 },
                 rsl_data::internal::ast::BinOp::Mod => todo!(),
                 rsl_data::internal::ast::BinOp::BinAnd => todo!(),
-                rsl_data::internal::ast::BinOp::LogAnd => todo!(),
                 rsl_data::internal::ast::BinOp::BinOr => todo!(),
-                rsl_data::internal::ast::BinOp::LogOr => todo!(),
+                rsl_data::internal::ast::BinOp::LogAnd => {
+                    idmap.insert(*out, d.b.logical_and(boolt, None, idmap[lhs], idmap[rhs]).unwrap());
+                },
+                rsl_data::internal::ast::BinOp::LogOr => {
+                    idmap.insert(*out, d.b.logical_or(boolt, None, idmap[lhs], idmap[rhs]).unwrap());
+                },
                 rsl_data::internal::ast::BinOp::BinXor => todo!(),
                 rsl_data::internal::ast::BinOp::Index => {
                     let t = d.get_type(&types[out], false);
@@ -666,12 +673,104 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                     idmap.insert(*out, d.b.access_chain(t, None, base, [idmap[rhs]]).unwrap());
                 },
                 rsl_data::internal::ast::BinOp::Assign => todo!(),
-                rsl_data::internal::ast::BinOp::Equals => todo!(),
-                rsl_data::internal::ast::BinOp::NotEquals => todo!(),
-                rsl_data::internal::ast::BinOp::Less => todo!(),
-                rsl_data::internal::ast::BinOp::LessEquals => todo!(),
-                rsl_data::internal::ast::BinOp::Greater => todo!(),
-                rsl_data::internal::ast::BinOp::GreaterEquals => todo!(),
+                rsl_data::internal::ast::BinOp::Equals => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            gen_op!(i_equal);
+                        } else if p.is_float() {
+                            gen_op!(f_ord_equal);
+                        } else if *p == Primitive::Bool {
+                            gen_op!(logical_equal);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::NotEquals => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            gen_op!(i_not_equal);
+                        } else if p.is_float() {
+                            gen_op!(f_ord_not_equal);
+                        } else if *p == Primitive::Bool {
+                            gen_op!(logical_not_equal);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::Less => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            if p.is_sint() {
+                                gen_op!(s_less_than);
+                            } else {
+                                gen_op!(u_less_than);
+                            }
+                        } else if p.is_float() {
+                            gen_op!(f_ord_less_than);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::LessEquals => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            if p.is_sint() {
+                                gen_op!(s_less_than_equal);
+                            } else {
+                                gen_op!(u_less_than_equal);
+                            }
+                        } else if p.is_float() {
+                            gen_op!(f_ord_less_than_equal);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::Greater => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            if p.is_sint() {
+                                gen_op!(s_greater_than);
+                            } else {
+                                gen_op!(u_greater_than);
+                            }
+                        } else if p.is_float() {
+                            gen_op!(f_ord_greater_than);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
+                rsl_data::internal::ast::BinOp::GreaterEquals => {
+                    if let Type::Primitive(p) = &types[lhs] {
+                        if p.is_int() {
+                            if p.is_sint() {
+                                gen_op!(s_greater_than_equal);
+                            } else {
+                                gen_op!(u_greater_than_equal);
+                            }
+                        } else if p.is_float() {
+                            gen_op!(f_ord_greater_than_equal);
+                        } else {
+                            todo!("{:#?}", p);
+                        }
+                    } else {
+                        todo!()
+                    }
+                },
             }
         },
         IRInstruction::Unit { out } => {},
@@ -783,11 +882,50 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
         },
         IRInstruction::Int { v, id, token_id, ty } => {
             let t = d.get_type(&types[id], false);
-            idmap.insert(*id, d.b.constant_bit32(t, *v as u32));
+            let v64 = match &types[id] {
+                Type::Primitive(p) => {
+                    match p {
+                        Primitive::F64 => {
+                            Some((*v as f64).to_bits())
+                        },
+                        _ => Some(*v as u64)
+                    }
+                },
+                _ => None
+            };
+            if let Some(v64) = v64 {
+                idmap.insert(*id, d.b.constant_bit64(t, v64));
+            } else {
+                idmap.insert(*id, d.b.constant_bit32(t, match &types[id] {
+                    Type::Primitive(p) => {
+                        match p {
+                            Primitive::F16 | Primitive::F32 => {
+                                (*v as f32).to_bits()
+                            },
+                            _ => *v as u32
+                        }
+                    },
+                    _ => todo!()
+                }));
+            }
+            
         },
         IRInstruction::Float { v, id, token_id, ty } => {
             let t = d.get_type(&types[id], false);
-            idmap.insert(*id, d.b.constant_bit32(t, (*v as f32).to_bits()));
+            let v64 = match &types[id] {
+                Type::Primitive(p) => {
+                    match p {
+                        Primitive::F64 => {
+                            idmap.insert(*id, d.b.constant_bit64(t, (*v as f64).to_bits()));
+                        },
+                        Primitive::F16 | Primitive::F32 => {
+                            idmap.insert(*id, d.b.constant_bit32(t, (*v as f32).to_bits()));
+                        }
+                        _ => todo!()
+                    }
+                },
+                _ => todo!()
+            };
         },
         IRInstruction::Cast { inp, out, ty } => todo!(),
         IRInstruction::Spread { inp, out, uni } => todo!(),
@@ -798,8 +936,13 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
             d.b.ret().unwrap();
         },
         IRInstruction::Loop { header, body, cont, merge, construct } => todo!(),
-        IRInstruction::Branch { target_block } => todo!(),
-        IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => todo!(),
+        IRInstruction::Branch { target_block } => {
+            d.b.branch(blockids[target_block.0]).unwrap();
+        },
+        IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => {
+            d.b.selection_merge(blockids[merge.0], SelectionControl::NONE).unwrap();
+            d.b.branch_conditional(idmap[inp], blockids[true_target_block.0], blockids[false_target_block.0], []).unwrap();
+        },
         IRInstruction::Phi { out, sources } => todo!(),
         IRInstruction::Path { path, tokens, id, lvalue } => unreachable!(),
     }

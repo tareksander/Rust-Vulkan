@@ -33,6 +33,8 @@ pub enum Keyword {
     Unsafe,
     Where,
     Type,
+    If,
+    Else,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
@@ -57,8 +59,10 @@ pub enum Special {
     Dot,
     DoubleDot,
     Comma,
-    AngleBracketOpen,
-    AngleBracketClose,
+    Less,
+    LessEquals,
+    Greater,
+    GreaterEquals,
     Bar,
     DoubleBar,
     And,
@@ -66,6 +70,7 @@ pub enum Special {
     ThinArrow,
     ThickArrow,
     Equals,
+    ExclamationEquals,
     DoubleEquals,
     Hash,
 }

@@ -327,7 +327,7 @@ fn parse_function(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, 
     let params;
     let mut ret = (Type::Unit, None);
     let ident = data.take_ident()?;
-    if *data.peek() == Token::Special(Special::AngleBracketOpen) {
+    if *data.peek() == Token::Special(Special::Less) {
         data.take();
         todo!()
     }
@@ -520,11 +520,11 @@ fn parse_item_path(data: &mut ParserData, in_expr: bool) -> ParserResult<ItemPat
     };
     let mut segments: Vec<ItemPathSegment> = vec![];
     loop {
-        if segments.len() != 0 && *data.peek() == Token::Special(Special::AngleBracketOpen) {
+        if segments.len() != 0 && *data.peek() == Token::Special(Special::Less) {
             let i = segments.len()-1;
             segments[i].generic_args = parse_delimited(data, parse_generic_arg,
                 Token::Special(Special::Comma),
-            Token::Special(Special::AngleBracketClose))?;
+            Token::Special(Special::Greater))?;
         }
         let t = data.take_ident()?;
         segments.push(ItemPathSegment {
@@ -532,11 +532,11 @@ fn parse_item_path(data: &mut ParserData, in_expr: bool) -> ParserResult<ItemPat
             ident_token: t.1,
             generic_args: vec![],
         });
-        if ! in_expr && *data.peek() == Token::Special(Special::AngleBracketOpen) {
+        if ! in_expr && *data.peek() == Token::Special(Special::Less) {
             let i = segments.len()-1;
             segments[i].generic_args = parse_delimited(data, parse_generic_arg,
                 Token::Special(Special::Comma),
-            Token::Special(Special::AngleBracketClose))?;
+            Token::Special(Special::Greater))?;
         }
         
         if *data.peek() == Token::Special(Special::DoubleColon) {
@@ -568,9 +568,6 @@ fn parse_block(data: &mut ParserData) -> ParserResult<Block> {
         if value.is_none() {
             match data.peek() {
                 // Only statements start with a keyword, but some keywords can be both statements and expressions (e.g. if)
-                Token::Keyword(keyword) => {
-                    todo!()
-                },
                 _ => {
                     value = Some(parse_expr(data)?);
                 }
@@ -688,6 +685,17 @@ static INFIX_OPS: LazyLock<HashMap<Token, (Infix, (u16, u16))>> = LazyLock::new(
     m.insert(Token::Special(Special::Star), (Infix::Bin(BinOp::Mul), pair(102)));
     m.insert(Token::Special(Special::Slash), (Infix::Bin(BinOp::Div), pair(102)));
     m.insert(Token::Special(Special::Dot), (Infix::Property, pair(998)));
+    
+    m.insert(Token::Special(Special::DoubleEquals), (Infix::Bin(BinOp::Equals), pair(92)));
+    m.insert(Token::Special(Special::ExclamationEquals), (Infix::Bin(BinOp::NotEquals), pair(92)));
+    m.insert(Token::Special(Special::Less), (Infix::Bin(BinOp::Less), pair(92)));
+    m.insert(Token::Special(Special::LessEquals), (Infix::Bin(BinOp::LessEquals), pair(92)));
+    m.insert(Token::Special(Special::Greater), (Infix::Bin(BinOp::Greater), pair(92)));
+    m.insert(Token::Special(Special::GreaterEquals), (Infix::Bin(BinOp::GreaterEquals), pair(92)));
+    
+    m.insert(Token::Special(Special::DoubleBar), (Infix::Bin(BinOp::LogOr), pair(90)));
+    m.insert(Token::Special(Special::DoubleAnd), (Infix::Bin(BinOp::LogAnd), pair(84)));
+    
     m.insert(Token::Special(Special::SquareBracketOpen), (Infix::Index, pair(996)));
     m.insert(Token::Special(Special::Equals), (Infix::Bin(BinOp::Assign), (2, 1)));
     return m;
@@ -711,7 +719,21 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
         let t = data.peek();
         let mut lhs = match *t {
             Token::Keyword(kw) => {
-                todo!("if , loop, etc.")
+                match kw {
+                    Keyword::If => {
+                        data.take();
+                        let condition = pratt(data, 0)?;
+                        let then_block = parse_block(data)?;
+                        let else_block = if data.peek() == &Token::Keyword(Keyword::Else) {
+                            data.take();
+                            Some(Box::new(parse_block(data)?))
+                        } else {
+                            None
+                        };
+                        Expression::If { condition: condition.into(), then: then_block.into(), other: else_block.into() }
+                    },
+                    _ => todo!("Keyword: {:#?}", kw)
+                }
             },
             Token::Ident(s) => Expression::Item(parse_item_path(data, true)?),
             Token::Special(s) => {
@@ -894,7 +916,12 @@ mod tests {
     #[test]
     fn module() -> Result<(), ()> {
         let strings = StringTable::new();
-        let code = black_box(String::from("#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) { c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x]; }"));
+        let code = black_box(String::from("#[compute] fn test(a: *const u32, b: *const u32, c: *mut u32) {
+            c[globalInvocationID.x] = a[globalInvocationID.x] + b[globalInvocationID.x];
+            if c[globalInvocationID.x] < 100 {
+                c[globalInvocationID.x] = 100;
+            }
+        }"));
         let code = &code;
         let mut cache = ReportSourceCache::new(&Sources {
             source_files: vec![PathBuf::from("test.rsl")],

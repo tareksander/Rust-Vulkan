@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use crate::internal::{ Attribute, InternedString, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, SymbolTable, Type}};
+use crate::internal::{ Attribute, InternedString, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{BlockID, Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, SymbolTable, Type}};
 
 
 
@@ -301,7 +301,33 @@ fn expr_to_blocks(d: &mut Data, e: Expression, lvalue: bool, locals: &mut HashMa
             insert(d.blocks, IRInstruction::Call { func: fi, args: params, out: i, span: item_path.range() });
             i
         },
-        Expression::If { condition, then, other } => todo!(),
+        Expression::If { condition, then, other } => {
+            let construct = condition.range();
+            let cond = expr_to_blocks(d, *condition, false, locals);
+            let current_block = d.blocks.len()-1;
+            let then_id = BlockID(d.blocks.len());
+            d.blocks.push(IRBlock { instructions: vec![] });
+            
+            // Todo: return values
+            block_to_ir(d, *then, locals.clone());
+            
+            let el_id = BlockID(d.blocks.len());
+            if let Some(el) = other {
+                d.blocks.push(IRBlock { instructions: vec![] });
+                block_to_ir(d, *el, locals.clone());
+            }
+            let merge = BlockID(d.blocks.len());
+            if el_id != merge {
+                insert(d.blocks, IRInstruction::Branch { target_block: merge });
+            }
+            d.blocks[then_id.0].instructions.push(IRInstruction::Branch { target_block: merge });
+            d.blocks[current_block].instructions.push(IRInstruction::If { inp: cond, true_target_block: then_id, false_target_block: el_id, merge, construct });
+            // TODO phy instructions for values mutated in branches
+            d.blocks.push(IRBlock { instructions: vec![] });
+            let i = d.id.next();
+            insert(d.blocks, IRInstruction::Unit { out: i });
+            i
+        },
         Expression::Loop { block } => todo!(),
         // TODO replace unwrap with error reporting
         Expression::Unsafe(block) => block_to_ir(d, *block, todo!()).unwrap(),

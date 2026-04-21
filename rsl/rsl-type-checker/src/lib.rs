@@ -554,9 +554,12 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                     },
                     BinOp::Mod => todo!(),
                     BinOp::BinAnd => todo!(),
-                    BinOp::LogAnd => todo!(),
                     BinOp::BinOr => todo!(),
-                    BinOp::LogOr => todo!(),
+                    BinOp::LogAnd | BinOp::LogOr => {
+                        data.type_vars[outty.0 as usize] = TCType::Primitive(Primitive::Bool);
+                        data.constraints.push(TypeConstraint::Same(outty, lhsty));
+                        data.constraints.push(TypeConstraint::Same(rhsty, lhsty));
+                    },
                     BinOp::BinXor => todo!(),
                     BinOp::Index => {
                         let mt = data.new_free_type(TCType::Unknown);
@@ -566,12 +569,10 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                         data.constraints.push(TypeConstraint::SamePointerMeta(lhsty, outty));
                     },
                     BinOp::Assign => unreachable!(),
-                    BinOp::Equals => todo!(),
-                    BinOp::NotEquals => todo!(),
-                    BinOp::Less => todo!(),
-                    BinOp::LessEquals => todo!(),
-                    BinOp::Greater => todo!(),
-                    BinOp::GreaterEquals => todo!(),
+                    BinOp::Equals | BinOp::NotEquals | BinOp::Less | BinOp::LessEquals | BinOp::Greater | BinOp::GreaterEquals => {
+                        data.type_vars[outty.0 as usize] = TCType::Primitive(Primitive::Bool);
+                        data.constraints.push(TypeConstraint::Same(rhsty, lhsty));
+                    },
                 }
             },
             rsl_data::internal::ir::IRInstruction::Unit { out } => {
@@ -620,7 +621,11 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
             rsl_data::internal::ir::IRInstruction::Return { token_id } => {},
             rsl_data::internal::ir::IRInstruction::Loop { header, body, cont, merge, construct } => todo!(),
             rsl_data::internal::ir::IRInstruction::Branch { target_block } => {},
-            rsl_data::internal::ir::IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => todo!(),
+            rsl_data::internal::ir::IRInstruction::If { inp, true_target_block, false_target_block, merge, construct } => {
+                let inty = data.tc_type_table[inp];
+                let oty = data.new_free_type(TCType::Primitive(Primitive::Bool));
+                data.constraints.push(TypeConstraint::Same(inty, oty));
+            },
             rsl_data::internal::ir::IRInstruction::Phi { out, sources } => todo!(),
         }
     }
