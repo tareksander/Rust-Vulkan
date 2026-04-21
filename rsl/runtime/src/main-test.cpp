@@ -16,11 +16,11 @@ int main() {
     auto buffer = c.device.createBuffer(vk::BufferCreateInfo {
         .sharingMode = vk::SharingMode::eConcurrent,
         .usage = vk::BufferUsageFlagBits::eShaderDeviceAddress | vk::BufferUsageFlagBits::eTransferDst,
-        .size = size * 4 * 3 + 3 * 8,
+        .size = size * 4 * 3 + 3 * 8 + 4,
     });
     auto mem = c.device.allocateMemory(vk::MemoryAllocateInfo {
         .memoryTypeIndex = c.mem_device_visible_buffer,
-        .allocationSize = size * 4 * 3 + 3 * 8,
+        .allocationSize = size * 4 * 3 + 3 * 8 + 4,
     });
     buffer.bindMemory(mem, 0);
     auto baddress = c.device.getBufferAddress(vk::BufferDeviceAddressInfo {
@@ -41,7 +41,7 @@ int main() {
     
     auto mpbuffer = (uint64_t*) (((char*) mapped_memory) + size * 4 * 3);
     auto mpbufferf = (float*) (((char*) mapped_memory) + size * 4 * 3 + 3 * 8);
-    *mpbufferf = 1000.0;
+    *mpbufferf = -1000.0;
     
     mpbuffer[0] = baddress;
     
