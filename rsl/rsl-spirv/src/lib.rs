@@ -34,10 +34,10 @@ mod tests {
         let strings = StringTable::new();
         let code_template = r"
         #[compute]
-        fn test(a: *const f32, b: *const f32, c: *mut f32, f: f32)
+        fn test(a: *const f32, b: *const bool, c: *mut f32, f: f32)
         {
-            c[globalInvocationID.x] = a[globalInvocationID.x] * b[globalInvocationID.x] + testu(&a[globalInvocationID.x]);
-            if c[globalInvocationID.x] < 100 {
+            c[globalInvocationID.x] = a[globalInvocationID.x] + testu(&a[globalInvocationID.x]);
+            if b[globalInvocationID.x] {
                 c[globalInvocationID.x] = 100;
             }
         }
@@ -106,7 +106,9 @@ mod tests {
                 
                 logical_pointer_specialization(&mut toplevel, &strings);
                 //println!("{:#?}", toplevel);
-                fs::write("test.spv", bytemuck::cast_slice(emit_spirv(&mut toplevel, &strings).as_slice())).unwrap();
+                let spirvblob = emit_spirv(&mut toplevel, &strings);
+                //println!("{}", spirvblob[0]);
+                fs::write("test.spv", bytemuck::cast_slice(spirvblob.as_slice())).unwrap();
                 
                 let t2 = Instant::now();
                 println!("Time: {} ms", (t2- t1).as_millis());

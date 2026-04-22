@@ -34,9 +34,16 @@ int main() {
         .size = VK_WHOLE_SIZE,
     });
     
+    auto mapped_bools = ((uint8_t*) mapped_memory) + size * 4;
+    
     for (int i = 0; i < size; i++) {
         mapped_memory[i] = (float)i - 0.5;
-        mapped_memory[i + size] = i % 2 == 0 ? 0.2 : -0.2;
+        //mapped_memory[i + size] = i % 2 == 0 ? 0.2 : -0.2;
+        if (i < size / 2) {
+            mapped_bools[i] = 0;
+        } else {
+            mapped_bools[i] = 1;
+        }
     }
     
     auto mpbuffer = (uint64_t*) (((char*) mapped_memory) + size * 4 * 3);

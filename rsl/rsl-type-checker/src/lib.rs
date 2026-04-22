@@ -202,7 +202,11 @@ impl TCType {
                 if p.is_int() {
                     v2.clone()
                 } else {
-                    return Err(TCError::Unknown(format!("Incompatible primitive with int: {:#?}", *p)));
+                    if p.is_float() {
+                        v2.clone()
+                    } else {
+                        return Err(TCError::Unknown(format!("Incompatible primitive with int: {:#?}", *p)));
+                    }
                 }
             },
             (TCType::Primitive(p), TCType::Int) => Self::unify_val_val(data, v2, v1)?,
@@ -211,7 +215,11 @@ impl TCType {
                 if p.is_uint() {
                     v2.clone()
                 } else {
-                    return Err(TCError::Unknown(format!("Incompatible primitive with uint: {:#?}", *p)));
+                    if p.is_float() {
+                        v2.clone()
+                    } else {
+                        return Err(TCError::Unknown(format!("Incompatible primitive with uint: {:#?}", *p)));
+                    }
                 }
             },
             (TCType::Primitive(p), TCType::UInt) => Self::unify_val_val(data, v2, v1)?,
@@ -220,7 +228,11 @@ impl TCType {
                 if p.is_sint() {
                     v2.clone()
                 } else {
-                    return Err(TCError::Unknown(format!("Incompatible primitive with sint: {:#?}", *p)));
+                    if p.is_float() {
+                        v2.clone()
+                    } else {
+                        return Err(TCError::Unknown(format!("Incompatible primitive with sint: {:#?}", *p)));
+                    }
                 }
             },
             (TCType::Primitive(p), TCType::SInt) => Self::unify_val_val(data, v2, v1)?,

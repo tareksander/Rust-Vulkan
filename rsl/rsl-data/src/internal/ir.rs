@@ -49,46 +49,44 @@ impl SymbolTable {
         
         let dummy_range = TokenRange { file: 0, range: 0..0 };
         
-        let globalInvocationID = strings.insert_get("globalInvocationID");
-        m.insert(globalInvocationID, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
-            ItemPathSegment {
-                ident: c,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            },
-            ItemPathSegment {
-                ident: globalInvocationID,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            }
-        ], global: true }, span: dummy_range.clone() })).unwrap();
+        macro_rules! core_import {
+            ($name:literal) => {
+                let n = strings.insert_get($name);
+                m.insert(n, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
+                    ItemPathSegment {
+                        ident: c,
+                        ident_token: dummy_range.clone(),
+                        generic_args: vec![]
+                    },
+                    ItemPathSegment {
+                        ident: n,
+                        ident_token: dummy_range.clone(),
+                        generic_args: vec![]
+                    }
+                ], global: true }, span: dummy_range.clone() })).unwrap();
+            };
+        }
         
-        let t = strings.insert_get("u32");
-        m.insert(t, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
-            ItemPathSegment {
-                ident: c,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            },
-            ItemPathSegment {
-                ident: t,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            }
-        ], global: true }, span: dummy_range.clone() })).unwrap();
-        let t = strings.insert_get("f32");
-        m.insert(t, (Visibility::Priv, GlobalItem::Import { path: ItemPath { segments: vec![
-            ItemPathSegment {
-                ident: c,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            },
-            ItemPathSegment {
-                ident: t,
-                ident_token: dummy_range.clone(),
-                generic_args: vec![]
-            }
-        ], global: true }, span: dummy_range.clone() })).unwrap();
+        core_import!("globalInvocationID");
+        
+        
+        
+        core_import!("u8");
+        core_import!("u16");
+        core_import!("u32");
+        core_import!("u64");
+        
+        core_import!("i8");
+        core_import!("i16");
+        core_import!("i32");
+        core_import!("i64");
+        
+        core_import!("f16");
+        core_import!("f32");
+        core_import!("f64");
+        
+        core_import!("bool");
+        core_import!("Unit");
         
         
         return m;
@@ -187,11 +185,31 @@ impl SymbolTable {
             ty: Type::Vector { components: 3, ty: Primitive::U32 },
         })).unwrap();
         
-        // TODO make declarative macro to help
-        t.insert(strings.insert_get("u32"), (Visibility::Pub, GlobalItem::Type(Type::Primitive(Primitive::U32)))).unwrap();
-        t.insert(strings.insert_get("f32"), (Visibility::Pub, GlobalItem::Type(Type::Primitive(Primitive::F32)))).unwrap();
+        
+        use crate::internal::ir::Primitive::*;
+        macro_rules! def_prim {
+            ($name:expr, $value: ident) => {
+                t.insert(strings.insert_get($name), (Visibility::Pub, GlobalItem::Type(Type::Primitive($value)))).unwrap();
+            };
+        }
         
         
+        def_prim!("Unit", Unit);
+        def_prim!("bool", Bool);
+        
+        def_prim!("u8", U8);
+        def_prim!("u16", U16);
+        def_prim!("u32", U32);
+        def_prim!("u64", U64);
+        
+        def_prim!("i8", I8);
+        def_prim!("i16", I16);
+        def_prim!("i32", I32);
+        def_prim!("i64", I64);
+        
+        def_prim!("f16", F16);
+        def_prim!("f32", F32);
+        def_prim!("f64", F64);
         
         
         return t;
