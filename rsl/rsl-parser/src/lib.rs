@@ -487,18 +487,11 @@ fn parse_type(data: &mut ParserData) -> ParserResult<Type> {
 
 fn parse_generic_arg(data: &mut ParserData) -> ParserResult<GenericArg> {
     match *data.peek() {
-        Token::Special(Special::Star) => {
-            return Ok(GenericArg::Type(parse_type(data)?));
-        },
-        Token::Special(Special::And) => {
-            return Ok(GenericArg::Type(parse_type(data)?));
-        },
-        Token::Ident(_) => {
-            return Ok(GenericArg::Type(parse_type(data)?));
-        },
+        // TODO lifetime generics
         
         _ => {}
     }
+    return Ok(GenericArg::Exp(parse_expr(data)?));
     data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
         .with_message("Expected generic argument, found invalid token")
         .with_label(Label::new(data.spans[data.index])
@@ -735,7 +728,10 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                     _ => todo!("Keyword: {:#?}", kw)
                 }
             },
-            Token::Ident(s) => Expression::Item(parse_item_path(data, true)?),
+            Token::Ident(s) => {
+                data.take();
+                Expression::Ident { name: s, global: false, range: TokenRange::point(data.file, data.index-1)}
+            },
             Token::Special(s) => {
                 // TODO filter groups, tuples and references
                 if let Some(op) = PREFIX_OPS.get(t) {
@@ -754,7 +750,11 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                     Expression::Unary { e: Box::new(rhs), op: op, op_range: r }
                 } else {
                     match s {
-                        Special::DoubleColon => Expression::Item(parse_item_path(data, true)?),
+                        Special::DoubleColon => {
+                            data.take();
+                            let s = data.take_ident()?;
+                            Expression::Ident { name: s.0, global: true, range: s.1 }
+                        },
                         _ => {
                             data.errors.push(Report::build(ReportKind::Error, data.spans[data.index])
                             .with_message("Expected operand, found invalid token")
@@ -829,10 +829,7 @@ fn parse_expr(data: &mut ParserData) -> ParserResult<Expression> {
                         Postfix::Call => {
                             let params = parse_delimited(data, parse_expr, Token::Special(Special::Comma), Token::Special(Special::RoundBracketClose)).unwrap();
                             assert!(data.take() == &Token::Special(Special::RoundBracketClose));
-                            lhs = Expression::Call(match lhs {
-                                Expression::Item(i) => i,
-                                _ => panic!("only directly specified functions can be called")
-                            }, params);
+                            lhs = Expression::Call(Box::new(lhs), params);
                         },
                     }
                 } else {

@@ -577,7 +577,7 @@ fn emit_function(f: &Function, d: &mut EmitData, entrypoint: bool, id: u32) -> O
 
 fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>, idmap: &mut HashMap<IRID, u32>, types: &HashMap<IRID, Type>, funcs: &mut HashMap<IRID, SymbolID>, bool_vars: &mut HashSet<u32>) {
     match inst {
-        IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
+        IRInstruction::ResolvedPath { path, tokens, id } => {
             // TODO: for now just insert the invocationid builtin
             let path = d.sym.follow_imports(*path);
             if d.strings.lookup(d.sym.get_name(path)) == "::core::globalInvocationID" {
@@ -980,7 +980,8 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
             d.b.branch_conditional(boolv, blockids[true_target_block.0], blockids[false_target_block.0], []).unwrap();
         },
         IRInstruction::Phi { out, sources } => todo!(),
-        IRInstruction::Path { path, tokens, id, lvalue } => unreachable!(),
+        IRInstruction::Ident { name, token, global, id } => unreachable!(),
+        IRInstruction::NOP => {},
     }
 }
 

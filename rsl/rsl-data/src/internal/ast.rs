@@ -92,10 +92,7 @@ impl SourceRange for ItemPathSegment {
 
 #[derive(Debug, Clone)]
 pub enum GenericArg {
-    /// Can be another generic or a concrete type.
-    Type(Type),
-    Expression(Expression),
-    Uniformity(Uniformity, TokenRange),
+    Exp(Expression),
     Lifetime(InternedString, TokenRange),
 }
 
@@ -142,11 +139,11 @@ pub enum Expression {
     Unary{ e: Box<Expression>, op: UnOp, op_range: TokenRange},
     Binary{ lhs: Box<Expression>, op: BinOp, rhs: Box<Expression>},
     Property { e: Box<Expression>, name: InternedString, name_token: TokenRange },
-    Item(ItemPath),
+    Ident{name: InternedString, global: bool, range: TokenRange},
     Group(Box<Expression>),
     IntLiteral(u128, TokenRange),
     FloatLiteral(f64, TokenRange),
-    Call(ItemPath, Vec<Expression>),
+    Call(Box<Expression>, Vec<Expression>),
     If {
         condition: Box<Expression>,
         then: Box<Block>,
@@ -165,7 +162,7 @@ impl SourceRange for Expression {
             Expression::Unary { e, op, op_range } => e.range().merge(op_range),
             Expression::Binary { lhs, op, rhs } => lhs.range().merge(&rhs.range()),
             Expression::Property { e, name, name_token } => e.range().merge(name_token),
-            Expression::Item(item_path) => item_path.range(),
+            Expression::Ident{name, global, range} => range.clone(),
             Expression::Group(expression) => expression.range(),
             Expression::IntLiteral(_, token_range) => token_range.clone(),
             Expression::FloatLiteral(_, token_range) => token_range.clone(),
@@ -210,7 +207,7 @@ impl Display for Expression {
                 
                 todo!()
             },
-            Expression::Item(item_path) => {
+            Expression::Ident{name, global, range} => {
                 
                 
                 

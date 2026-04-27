@@ -398,6 +398,7 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
             },
             TypeConstraint::MemberOf(st, mt, mn) => {
                 // TODO use canonical name, maybe resolve these later and until fixpoint
+                // because later constraints could give info on what kind of struct/vector the base is
                 match d.type_vars[st.0 as usize].clone() {
                     TCType::Vector { components, ty } => {
                         TCType::unify_var_val(&mut d, *mt, &TCType::Pointer { class: StorageClass::Logical, ty, mutability: None }).unwrap();
@@ -508,8 +509,8 @@ fn to_tctype(symbols: &SymbolTable, ty: &Type) -> TCType {
 fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
     for inst in &block.instructions {
         match inst {
-            rsl_data::internal::ir::IRInstruction::Path { path, tokens, id, lvalue } => todo!(),
-            rsl_data::internal::ir::IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
+            rsl_data::internal::ir::IRInstruction::Ident { name, token, global, id } => todo!(),
+            rsl_data::internal::ir::IRInstruction::ResolvedPath { path, tokens, id } => {
                 let s = symbols.get(*path);
                 match &s.1 {
                     rsl_data::internal::ir::GlobalItem::StructTemplate { args, constraints } => todo!(),
@@ -639,6 +640,7 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 data.constraints.push(TypeConstraint::Same(inty, oty));
             },
             rsl_data::internal::ir::IRInstruction::Phi { out, sources } => todo!(),
+            rsl_data::internal::ir::IRInstruction::NOP => {},
         }
     }
 }

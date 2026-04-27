@@ -351,28 +351,34 @@ impl SymbolTable {
             }
         }
         
-        fn resolve_item(table: &SymbolTable, p: &mut ItemPath, m: InternedString, strings: &StringTable) -> SymbolID {
+        
+        fn resolve_item_local(table: &SymbolTable, p: &[InternedString], m: InternedString, strings: &StringTable) -> Result<SymbolID, ()> {
             let mut sym = None;
-            if ! p.global {
-                let lp = p.segments[0].ident;
-                let gp = strings.insert_get(&(strings.lookup(m) + "::" + &strings.lookup(lp)));
-                if table.lookup_id(&gp).is_some() {
-                    if let Some(s) = table.lookup_id(&p.interned(strings, m)) {
-                        sym = Some(s);
-                    } else {
-                        panic!()
-                    }
-                }
-            }
-            if sym.is_none() {
-                p.global = true;
-                if let Some(s) = table.lookup_id(&p.interned(strings, m)) {
+            let gp = strings.lookup(m) + "::" + &p.iter().map(|i| strings.lookup(*i)).reduce(|p, n| p + "::" + &n).unwrap();
+            //println!("potential path3: {}", gp);
+            let gpi = strings.insert_get(&gp);
+            if table.lookup(&gpi).is_some() {
+                if let Some(s) = table.lookup_id(&gpi) {
                     sym = Some(s);
                 } else {
-                    panic!("could not find symbol: {}", strings.lookup(p.interned(strings, m)));
-                } 
+                    return Err(());
+                }
             }
-            return sym.unwrap();
+            return sym.ok_or(());
+        }
+        
+        fn resolve_item_global(table: &SymbolTable, p: &[InternedString], strings: &StringTable) -> Result<SymbolID, ()> {
+            let mut sym = None;
+            let gp = p.iter().map(|i| strings.lookup(*i)).reduce(|p, n| p + "::" + &n).unwrap();
+            let gpi = strings.insert_get(&gp);
+            if table.lookup(&gpi).is_some() {
+                if let Some(s) = table.lookup_id(&gpi) {
+                    sym = Some(s);
+                } else {
+                    return Err(());
+                }
+            }
+            return sym.ok_or(());
         }
         
         
@@ -389,11 +395,73 @@ impl SymbolTable {
                     let mut rt = f.ret.borrow_mut();
                     resolve_type(self, &mut rt.0, m, strings);
                     for b in blocks.iter_mut() {
-                        for inst in &mut b.instructions {
-                            match inst {
-                                IRInstruction::Path { path, tokens, id, lvalue } => {
-                                    let pid  = resolve_item(self, path, m, strings);
-                                    *inst = IRInstruction::ResolvedPath { path: pid, tokens: tokens.clone(), id: *id, lvalue: *lvalue  };
+                        for i in 0..(b.instructions.len()) {
+                            match &mut b.instructions[i] {
+                                IRInstruction::Ident { name, token, global, id } => {
+                                    let name = *name;
+                                    let token = token.clone();
+                                    let global = *global;
+                                    let id = *id;
+                                    let mut path = vec![name];
+                                    
+                                    let mut last_id = id;
+                                    for i in (i+1)..(b.instructions.len()) {
+                                        match &b.instructions[i] {
+                                            IRInstruction::Property { inp, name, out } => {
+                                                if *inp == last_id {
+                                                    last_id = *out;
+                                                    path.push(name.0);
+                                                } else {
+                                                    break;
+                                                }
+                                            }
+                                            _ => {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    //println!("Potential path: {}", path.iter().map(|s| strings.lookup(*s)).reduce(|p, n| p + "::" + &n).unwrap());
+                                    
+                                    let mut resolved = None;
+                                    if ! global {
+                                        for i in 1..path.len()+1 {
+                                            if let Ok(s) = resolve_item_local(self, &path[0..i], m, strings) {
+                                                match &self.get(s).1 {
+                                                    GlobalItem::Removed => {}
+                                                    GlobalItem::RemovedModule => {},
+                                                    GlobalItem::Placeholder => {},
+                                                    _ => {
+                                                        resolved = Some((s, i));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if resolved.is_none() {
+                                        for i in 1..path.len()+1 {
+                                            //println!("Potential path2: {}", path[0..i].iter().map(|s| strings.lookup(*s)).reduce(|p, n| p + "::" + &n).unwrap());
+                                            if let Ok(s) = resolve_item_global(self, &path[0..i], strings) {
+                                                match &self.get(s).1 {
+                                                    GlobalItem::Removed => {}
+                                                    GlobalItem::RemovedModule => {},
+                                                    GlobalItem::Placeholder => {},
+                                                    _ => {
+                                                        resolved = Some((s, i));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    let resolved = resolved.unwrap();
+                                    
+                                    for i in (i+1)..(i+resolved.1) {
+                                        b.instructions[i] = IRInstruction::NOP;
+                                    }
+                                    b.instructions[i] = IRInstruction::ResolvedPath { path: resolved.0, tokens: token, id };
+                                    
                                 },
                                 IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
                                     if let Some(ty) = ty {
@@ -500,7 +568,7 @@ impl Debug for Function {
                     IRInstruction::Local { ident, ident_token, id, ty, uni, mutable } => {
                         print_type(id)
                     },
-                    IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
+                    IRInstruction::ResolvedPath { path, tokens, id } => {
                         print_type(id)
                     },
                     IRInstruction::UnOp { inp, op, out, span } => {
@@ -685,13 +753,11 @@ pub struct BlockID(pub usize);
 pub enum IRInstruction {
     /// An unresolved path. Should be eliminated by path canonicalization.
     /// Can be turned either into a ResolvedPath or eliminated via replacing with the local SSA ID.
-    Path {
-        path: ItemPath,
-        tokens: TokenRange,
+    Ident {
+        name: InternedString,
+        token: TokenRange,
+        global: bool,
         id: IRID,
-        /// Whether an lvalue or an rvalue is needed. If an rvalue is needed, a load instruction will be inserted for the resolved path.
-        /// If an lvalue is needed for a constant, a temporary variable is created and the value stored there, and its id replaces the one of the path.
-        lvalue: bool,
     },
     
     /// A path that has been resolved into a global symbol ID.
@@ -702,7 +768,6 @@ pub enum IRInstruction {
         path: SymbolID,
         tokens: TokenRange,
         id: IRID,
-        lvalue: bool,
     },
     
     Local {
@@ -738,6 +803,8 @@ pub enum IRInstruction {
         // assignments shouldn't be an IR operation, they are immediately desugared to a store operation.
     },
     
+    
+    NOP,
     
     Unit {
         out: IRID

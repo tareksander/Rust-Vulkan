@@ -265,20 +265,12 @@ fn expr_to_blocks(d: &mut Data, e: Expression, lvalue: bool, locals: &mut HashMa
                 i
             }
         },
-        Expression::Item(item_path) => {
-            if item_path.global == false && item_path.segments.len() == 1 && item_path.segments[0].generic_args.len() == 0 &&
-               let Some(lid) = locals.get(&item_path.segments[0].ident) {
-                   if lid.0 < d.num_params {
-                    *lid
-                } else {
-                    let i = d.id.next();
-                    insert(d.blocks, IRInstruction::Load { ptr: *lid, out: i });
-                    i
-                }
+        Expression::Ident { name, global, range } => {
+            if let Some(l) = locals.get(&name) {
+                *l
             } else {
                 let i = d.id.next();
-                let r = item_path.range();
-                insert(d.blocks, IRInstruction::Path { path: item_path, tokens: r, id: i, lvalue });
+                insert(d.blocks, IRInstruction::Ident { name, token: range, global, id: i });
                 i
             }
         },
@@ -293,12 +285,12 @@ fn expr_to_blocks(d: &mut Data, e: Expression, lvalue: bool, locals: &mut HashMa
             insert(d.blocks, IRInstruction::Float { v, id: i, token_id: token_range, ty: None });
             i
         },
-        Expression::Call(item_path, expressions) => {
-            let fi = d.id.next();
-            insert(d.blocks, IRInstruction::Path { path: item_path.clone(), tokens: item_path.range(), id: fi, lvalue: false });
+        Expression::Call(lhs, expressions) => {
+            let span = lhs.range();
+            let fi = expr_to_blocks(d, *lhs, false, locals);
             let i = d.id.next();
-            let mut params = expressions.iter().map(|e| expr_to_blocks(d, e.clone(), false, locals)).collect();
-            insert(d.blocks, IRInstruction::Call { func: fi, args: params, out: i, span: item_path.range() });
+            let params = expressions.iter().map(|e| expr_to_blocks(d, e.clone(), false, locals)).collect();
+            insert(d.blocks, IRInstruction::Call { func: fi, args: params, out: i, span });
             i
         },
         Expression::If { condition, then, other } => {

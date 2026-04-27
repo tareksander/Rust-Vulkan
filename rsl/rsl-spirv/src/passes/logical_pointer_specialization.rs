@@ -86,7 +86,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                 for b in blocks.iter_mut() {
                     for mut i in b.instructions.iter_mut() {
                         match &mut i {
-                            IRInstruction::ResolvedPath { path, tokens, id, lvalue } => {
+                            IRInstruction::ResolvedPath { path, tokens, id } => {
                                 let path = sym.follow_imports(*path);
                                 if path == globalInvocationID {
                                     match &mut types.get_mut(id).unwrap() {
