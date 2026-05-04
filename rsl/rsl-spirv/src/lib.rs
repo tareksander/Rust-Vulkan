@@ -33,17 +33,19 @@ mod tests {
     fn basic() -> Result<(), ()> {
         let strings = StringTable::new();
         let code_template = r"
-        #[compute]
-        fn test(a: *const f32, b: *const bool, c: *mut f32, f: f32)
-        {
-            c[globalInvocationID.x] = a[globalInvocationID.x] + testu(&a[globalInvocationID.x]);
-            if b[globalInvocationID.x] {
-                c[globalInvocationID.x] = 100;
-            }
+        struct STest {
+            a: f32,
+            b: f32
         }
         
-        fn testu(a: *const f32) -> f32 {
-            *a * 2.0
+        #[compute]
+        fn test(a: *const STest, c: *mut f32)
+        {
+            c[globalInvocationID.x] = a[globalInvocationID.x].a + a[globalInvocationID.x].b;
+        }
+        
+        fn testu(a:  f32) -> f32 {
+            a * 2.0
         }
         ";
         
@@ -73,6 +75,7 @@ mod tests {
                     e.iter().for_each(|e| e.eprint(&mut cache).unwrap());
                     return Err(());
                 }
+                //println!("{:#?}", m);
                 let m = SymbolTable::from_module(m, &strings);
                 
                 let core = SymbolTable::core(&strings);
@@ -85,11 +88,11 @@ mod tests {
                 
                 for s in toplevel.iter() {
                     let name = toplevel.get_name(s);
-                    println!("{}", strings.lookup(name));
+                    //println!("{}", strings.lookup(name));
                 }
                 
                 
-                //println!("{:#?}", toplevel);
+                println!("{:#?}", toplevel.lookup(&strings.insert_get("::test::test0")).unwrap().1);
                 
                 let t1 = Instant::now();
                 //println!("Time: {} ms", (t1- t0).as_millis());

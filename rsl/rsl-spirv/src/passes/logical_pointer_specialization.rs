@@ -1,13 +1,21 @@
 use std::collections::HashMap;
 
-use rsl_data::internal::{Mutability, StorageClass, StringTable, ir::{GlobalItem, IRID, IRInstruction, SymbolID, SymbolTable, Type}};
+use rsl_data::internal::{InternedString, StorageClass, StringTable, ir::{GlobalItem, IRID, IRInstruction, SymbolID, SymbolTable, Type}};
 
 
 struct SpecializationRequest {
     sym: SymbolID,
     classes: Vec<Option<StorageClass>>,
+    rename: bool,
 }
 
+
+struct Fixup {
+    sym: SymbolID,
+    block: usize,
+    inst: usize,
+    new_func: InternedString,
+}
 
 
 /// - Converts entrypoint parameters to physical pointers.
@@ -25,7 +33,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
     // Maybe keep the names in a list?
     
     let globalInvocationID = sym.lookup_id(&strings.insert_get("::core::globalInvocationID")).unwrap();
-    println!("{:#?}", globalInvocationID);
+    //println!("{:#?}", globalInvocationID);
     
     let mut requests = vec![];
     
@@ -51,6 +59,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                         requests.push(SpecializationRequest {
                             sym: s,
                             classes,
+                            rename: false
                         });
                     }
                 }
@@ -58,13 +67,28 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
         }
     }
     
+    let mut fixups = vec![];
     
+    fn specialized_name(sym: &SymbolTable, strings: &StringTable, s: SymbolID, classes: &[Option<StorageClass>]) -> InternedString {
+        strings.insert_get(&("%".to_string() + &strings.lookup(sym.get_name(s)) + "%" + &classes.iter().filter_map(|v| if let Some(sc) = v {
+            Some(sc.to_string().to_owned())
+        } else {
+            None
+        }).reduce(|p, n| p + "&" + &n).unwrap()))
+    }
     
     loop {
         let mut new_requests: Vec<SpecializationRequest> = vec![];
         
         for r in &requests {
-            let s = r.sym;
+            let s = if r.rename {
+                let name = specialized_name(sym, strings, r.sym, &r.classes);
+                let f = sym.get(r.sym).clone();
+                sym.insert(name, f).unwrap();
+                sym.lookup_id(&name).unwrap()
+            } else {
+                r.sym
+            };
             let i = sym.get(s);
             if let GlobalItem::Function(f) = &i.1 {
                 let mut storage_classes: HashMap<IRID, StorageClass> = HashMap::new();
@@ -83,8 +107,8 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                     }
                 }
                 
-                for b in blocks.iter_mut() {
-                    for mut i in b.instructions.iter_mut() {
+                for (block_index, b) in blocks.iter_mut().enumerate() {
+                    for (inst_index, mut i) in b.instructions.iter_mut().enumerate() {
                         match &mut i {
                             IRInstruction::ResolvedPath { path, tokens, id } => {
                                 let path = sym.follow_imports(*path);
@@ -99,7 +123,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                 }
                                 match &sym.get(path).1 {
                                     GlobalItem::Function(f) => {
-                                        funcs.insert(*id, path);
+                                        funcs.insert(*id, (path, block_index, inst_index));
                                     },
                                     _ => {}
                                 }
@@ -137,9 +161,9 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                             Type::Pointer { class, ty, mutability } => {
                                                 // TODO conflicting storage classes?
                                                 if *class == StorageClass::Logical {
-                                                    storage_classes.insert(*rhs, storage_classes[lhs]);
-                                                    *class = storage_classes[lhs];
+                                                    panic!("logical storage classin index lhs");
                                                 }
+                                                storage_classes.insert(*out, storage_classes[lhs]);
                                             },
                                             _ => unreachable!()
                                         }
@@ -154,6 +178,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                 }
                             },
                             IRInstruction::Property { inp, name, out } => {
+                                println!("{}", inp.0);
                                 storage_classes.insert(*out, storage_classes[inp]);
                                 match &mut types.get_mut(out).unwrap() {
                                     Type::Pointer { class, ty, mutability } => {
@@ -166,7 +191,7 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                 }
                             },
                             IRInstruction::Call { func, args, out, span } => {
-                                let called = funcs[func];
+                                let (called, path_block, path_inst) = funcs[func];
                                 match &sym.get(called).1 {
                                     GlobalItem::Function(f) => {
                                         if f.num_params != 0 {
@@ -189,7 +214,13 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
                                                 }
                                             }
                                             if classes.iter().any(|v| v.is_some()) {
-                                                new_requests.push(SpecializationRequest { sym: called, classes });
+                                                fixups.push(Fixup {
+                                                    sym: s,
+                                                    block: path_block,
+                                                    inst: path_inst,
+                                                    new_func: specialized_name(sym, strings, called, &classes),
+                                                });
+                                                new_requests.push(SpecializationRequest { sym: called, classes, rename: true });
                                             }
                                         }
                                     },
@@ -216,13 +247,24 @@ pub fn logical_pointer_specialization(sym: &mut SymbolTable, strings: &StringTab
             break;
         }
         
-        // clear and swap
-        
-        requests.clear();
-        let tmp = requests;
         requests = new_requests;
-        new_requests = tmp;
     }
+    
+    for f in fixups {
+        match &sym.get(f.sym).1 {
+            GlobalItem::Function(func) => {
+                let mut blocks = func.blocks.borrow_mut();
+                match &mut blocks[f.block].instructions[f.inst] {
+                    IRInstruction::ResolvedPath { path, tokens, id } => {
+                        *path = sym.lookup_id(&f.new_func).unwrap();
+                    }
+                    _ => panic!()
+                }
+            }
+            _ => panic!()
+        }
+    }
+    
 }
 
 

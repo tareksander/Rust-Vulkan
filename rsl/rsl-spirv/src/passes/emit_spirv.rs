@@ -78,7 +78,6 @@ impl<'a> SpirvTypeCache<'a> {
         let sty = b.type_struct(types);
         let ret;
         if block {
-            b.decorate(sty, Decoration::Block, []);
             let mut max_align = 1;
             let mut offset: u16 = 0;
             for i in 0..ty.len() {
@@ -109,7 +108,12 @@ impl<'a> SpirvTypeCache<'a> {
         }
         match ty {
             Type::Unresolved(item_path) => unreachable!(),
-            Type::Resolved(symbol_id) => todo!(),
+            Type::Resolved(symbol_id) => match &self.sym.get(*symbol_id).1 {
+                GlobalItem::Struct(s) => {
+                    self.spirv_struct(b, &s.borrow().fields, true).1
+                },
+                _ => todo!("type symbol not a struct")
+            },
             Type::Primitive(primitive) => {
                 match primitive {
                     Primitive::U8 => TypeLayout { alignment: 1, size: 1 },
@@ -163,7 +167,12 @@ impl<'a> SpirvTypeCache<'a> {
             return *id;
         }
         let id = match ty {
-            Type::Resolved(symbol_id) => todo!(),
+            Type::Resolved(symbol_id) => match &self.sym.get(*symbol_id).1 {
+                GlobalItem::Struct(s) => {
+                    self.spirv_struct(b, &s.borrow().fields, block).0
+                },
+                _ => todo!("type symbol not a struct")
+            },
             Type::Primitive(primitive) => {
                 match primitive {
                     Primitive::U8 => b.type_int(8, 0),
@@ -248,18 +257,43 @@ struct EmitData<'a> {
     u8zero: u32,
     u8one: u32,
     u8t: u32,
+    u32t: u32,
 }
 
 impl<'a> EmitData<'a> {
     
     fn new(b: &'a mut rspirv::dr::Builder, sym: &'a SymbolTable, types: &'a mut SpirvTypeCache<'a>, builtins:&'a mut HashMap<Builtin, u32>, strings: &'a StringTable ) -> Self {
         let u32t = types.get(b, &Type::Primitive(Primitive::U32), false);
+        b.name(u32t, "u32");
         let boolt = b.type_bool();
+        b.name(boolt, "spirv_bool");
         let u32zero = b.constant_bit32(u32t, 0);
         let fpflags = b.constant_bit32(u32t, (FPFastMathMode::NSZ).bits());
+        b.name(fpflags, "fpflags");
         let u8t = b.type_int(8, 0);
+        b.name(u8t, "u8");
         let u8zero = b.constant_bit32(u8t, 0);
         let u8one = b.constant_bit32(u8t, 1);
+        macro_rules! decorate_name {
+            ($id: expr, $name: expr) => {
+                let n = $id;
+                b.name(n, $name);
+            };
+        }
+        
+        decorate_name!(b.type_int(16, 0), "u16");
+        decorate_name!(b.type_int(64, 0), "u64");
+        
+        decorate_name!(b.type_int(8, 1), "i8");
+        decorate_name!(b.type_int(16, 1), "i16");
+        decorate_name!(b.type_int(32, 1), "i32");
+        decorate_name!(b.type_int(64, 1), "i64");
+        
+        decorate_name!(b.type_float(16, None), "f16");
+        decorate_name!(b.type_float(32, None), "f32");
+        decorate_name!(b.type_float(64, None), "f64");
+        
+        
         EmitData {
             b,
             sym,
@@ -273,6 +307,7 @@ impl<'a> EmitData<'a> {
             u8zero,
             u8one,
             u8t,
+            u32t,
         }
     }
     
@@ -394,7 +429,9 @@ pub fn emit_spirv(sym: &mut SymbolTable, strings: &StringTable) -> Vec<u32> {
     for s in sym.iter() {
         match &sym.get(s).1 {
             GlobalItem::Function(f) => {
-                d.funcs.insert(s, d.b.id());
+                let fid = d.b.id();
+                d.funcs.insert(s, fid);
+                d.b.name(fid, d.strings.lookup(sym.get_name(s)));
             }
             _ => {}
         }
@@ -870,7 +907,18 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                     match &**ty {
                         Type::Unresolved(item_path) => unreachable!(),
                         Type::Primitive(primitive) => unreachable!(),
-                        Type::Resolved(symbol_id) => todo!(),
+                        Type::Resolved(symbol_id) => match &d.sym.get(*symbol_id).1 {
+                            GlobalItem::Struct(s) => {
+                                let m = s.borrow().field_names[&name.0];
+                                let mty = d.get_type(&Type::Pointer { class: *class, ty: Box::new(s.borrow().fields[m].clone()), mutability: Mutability::Mutable },
+                                class.explicit_layout());
+                                println!("mty: {}", mty);
+                                println!("inp: {}", idmap[inp]);
+                                let mc = d.b.constant_bit32(d.u32t, m as u32);
+                                idmap.insert(*out, d.b.access_chain(mty, None, idmap[inp], [mc]).unwrap());
+                            },
+                            _ => todo!("type symbol not a struct")
+                        },
                         Type::Vector { components, ty: _ } => {
                             let index = match name.0.get(d.strings).as_str() {
                                 "x" => 0,
@@ -882,7 +930,7 @@ fn emit_instruction(inst: &IRInstruction, d: &mut EmitData, blockids: &Vec<u32>,
                             let u32t = d.get_type(&Type::Primitive(Primitive::U32), false);
                             let index = d.b.constant_bit32(u32t, index);
                             let t = d.get_type(&types[out], false);
-                            println!("{}", d.strings.lookup(name.0));
+                            //println!("{}", d.strings.lookup(name.0));
                             idmap.insert(*out, d.b.access_chain(t, None, idmap[inp], [index]).unwrap());
                         },
                         Type::Matrix { rows, cols, ty } => todo!(),

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use crate::internal::{ Attribute, InternedString, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{BlockID, Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, SymbolTable, Type}};
+use crate::internal::{ Attribute, InternedString, Mutability, ShaderType, StorageClass, StringTable, Uniformity, Visibility, ast::{self, BinOp, Block, Expression, FunctionDefinition, ModuleData, SourceRange, Statement, UnOp}, ir::{BlockID, Function, GlobalItem, IRBlock, IRID, IRInstruction, Primitive, Struct, SymbolTable, Type}};
 
 
 
@@ -18,6 +18,16 @@ impl SymbolTable {
             s.insert(f.ident, function_definition_to_ir(f)).unwrap();
         }
         
+        for st in module.structs {
+            let fields = st.fields.iter().map(|f| (f.ident, type_to_ir(f.ty.clone()).unwrap(), f.visibility.clone().map(|v| v.0).unwrap_or(Visibility::Priv))).collect::<Vec<_>>();
+            s.insert(st.ident, (st.visibility.map(|v| v.0).unwrap_or(Visibility::Priv), GlobalItem::Struct(Struct {
+                attrs: st.attrs,
+                ident_token: st.ident_token,
+                fields: fields.iter().map(|f| f.1.clone()).collect(),
+                field_names: fields.iter().enumerate().map(|f| (f.1.0, f.0)).collect(),
+                field_visibilities: fields.iter().map(|f| f.2).collect(),
+            }.into()))).unwrap();
+        }
         
         
         return s;

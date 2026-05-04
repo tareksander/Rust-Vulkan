@@ -2,7 +2,7 @@
 
 
 use core::slice;
-use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Pointer}, hash::Hash, iter::Enumerate, mem::replace, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Formatter, Pointer}, hash::Hash, iter::Enumerate, mem::replace, rc::Rc};
 
 
 use crate::internal::{Builtin, Mutability, ShaderType, StringTable, Visibility, ast::ItemPathSegment};
@@ -331,7 +331,9 @@ impl SymbolTable {
                     match &table.get(s).1 {
                         GlobalItem::Type(ty) => {
                             *t = ty.clone();
-                            
+                        }
+                        GlobalItem::Struct(_) => {
+                            *t = Type::Resolved(s);
                         }
                         _ => {
                             todo!()
@@ -474,6 +476,13 @@ impl SymbolTable {
                     }
                     // TODO load constants into function variables for lvalue positions
                 },
+                (v, GlobalItem::Struct(s)) => {
+                    let m = self.mapr[&id].base(strings);
+                    let mut s = s.borrow_mut();
+                    for f in &mut s.fields {
+                        resolve_type(self, f, m, strings);
+                    }
+                }
                 _ => {}
             }
         }
@@ -489,11 +498,7 @@ pub enum GlobalItem {
         args: Vec<GenericArgDefinition>,
         constraints: Vec<GenericsConstraint>,
     },
-    Struct {
-        attrs: Vec<Attribute>,
-        ident_token: TokenRange,
-        
-    },
+    Struct(RefCell<Struct>),
     Trait {
         attrs: Vec<Attribute>,
         ident_token: TokenRange,
@@ -530,6 +535,16 @@ pub enum GlobalItem {
     Module(SymbolTable),
     RemovedModule,
     Removed,
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Struct {
+    pub attrs: Vec<Attribute>,
+    pub ident_token: TokenRange,
+    pub fields: Vec<Type>,
+    pub field_visibilities: Vec<Visibility>,
+    pub field_names: HashMap<InternedString, usize>,
 }
 
 #[derive(Clone)]

@@ -68,7 +68,7 @@ impl TCType {
     
     fn canonicalize(&self, table: &Vec<TCType>) -> TCType {
         match self {
-            TCType::Struct(symbol_id) => todo!(),
+            TCType::Struct(symbol_id) => self.clone(),
             TCType::Function { sym, params , ret} => self.clone(),
             TCType::Number => TCType::Primitive(Primitive::I32),
             TCType::Primitive(primitive) => self.clone(),
@@ -91,7 +91,7 @@ impl TCType {
     
     fn to_ir_type(&self) -> Type {
         match self {
-            TCType::Struct(symbol_id) => todo!(),
+            TCType::Struct(symbol_id) => Type::Resolved(*symbol_id),
             TCType::Function { sym, params , ret} => Type::Function { sym: *sym },
             TCType::Number => todo!(),
             TCType::Primitive(primitive) => Type::Primitive(*primitive),
@@ -120,17 +120,35 @@ impl TCType {
     
     fn unify_var_val(data: &mut TCData, var: TypeID, val: &TCType) -> Result<TCType, TCError> {
         let t = data.type_vars[var.0 as usize].clone();
-        data.type_vars[var.0 as usize] = Self::unify_val_val(data, &t, val)?;
-        return Ok(TCType::TypeVariable(var));
+        data.type_vars[var.0 as usize] = Self::unify_val_val(data, &t, val).map_err(|e| match e {
+            TCError::Unknown(s) => TCError::Unknown(s + &format!(" (while unifying type of {})",
+            data.reverse_type_table.get(&var).map(|id| format!("id {}", id.0)).unwrap_or("(free type)".to_string()))),
+        })?;
+        Ok(match t {
+            TCType::TypeVariable(_) => t,
+            _ => TCType::TypeVariable(var)
+        })
     }
     
     fn unify_var_var(data: &mut TCData, v1: TypeID, v2: TypeID) -> Result<TCType, TCError> {
+        if v1.0 == v2.0 {
+            return Ok(TCType::TypeVariable(v1));
+        }
         let t1 = data.type_vars[v1.0 as usize].clone();
         let t2 = data.type_vars[v2.0 as usize].clone();
-        let t = Self::unify_val_val(data, &t1, &t2)?;
+        let t = Self::unify_val_val(data, &t1, &t2).map_err(|e| match e {
+            TCError::Unknown(s) => TCError::Unknown(s + &format!(" (while unifying type of {} with type of {})",
+            data.reverse_type_table.get(&v1).map(|id| format!("id {}", id.0)).unwrap_or("(free type)".to_string()),
+            data.reverse_type_table.get(&v2).map(|id| format!("id {}", id.0)).unwrap_or("(free type)".to_string()))),
+        })?;
+        //println!("unifying type vars {} and {}", v1.0, v2.0);
         data.type_vars[v1.0 as usize] = t.clone();
-        data.type_vars[v2.0 as usize] = TCType::TypeVariable(v1);
-        return Ok(TCType::TypeVariable(v1));
+        data.type_vars[v2.0 as usize] = match t {
+            TCType::TypeVariable(_) => t,
+            _ => TCType::TypeVariable(v1)
+        };
+        //println!("Result: {:?} and {:?}", data.type_vars[v1.0 as usize], data.type_vars[v2.0 as usize]);
+        return Ok(data.type_vars[v2.0 as usize].clone());
     }
     
     fn unify_val_val(data: &mut TCData, v1: &TCType, v2: &TCType) -> Result<TCType, TCError> {
@@ -147,6 +165,9 @@ impl TCType {
             
             (TCType::VecOrStruct, TCType::Vector { components, ty }) => v2.clone(),
             (TCType::Vector { components, ty }, TCType::VecOrStruct) => Self::unify_val_val(data, v2, v1)?,
+            
+            (TCType::VecOrStruct, TCType::Struct(s)) => v2.clone(),
+            (TCType::Struct(_), TCType::VecOrStruct) => Self::unify_val_val(data, v2, v1)?,
             
             (TCType::Indexable, TCType::Pointer { class, ty, mutability }) => v2.clone(),
             (TCType::Pointer { class, ty, mutability }, TCType::Indexable) => Self::unify_val_val(data, v2, v1)?,
@@ -269,7 +290,7 @@ impl TCType {
             
             
             _ => {
-                todo!("Unify of {:?} and {:?}", v1, v2);
+                return Err(TCError::Unknown(format!("Unify of {:?} and {:?}", v1, v2)));
             }
         })
     }
@@ -399,11 +420,22 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
             TypeConstraint::MemberOf(st, mt, mn) => {
                 // TODO use canonical name, maybe resolve these later and until fixpoint
                 // because later constraints could give info on what kind of struct/vector the base is
-                match d.type_vars[st.0 as usize].clone() {
+                match d.type_vars[st.0 as usize].clone().canonicalize(&d.type_vars) {
                     TCType::Vector { components, ty } => {
-                        TCType::unify_var_val(&mut d, *mt, &TCType::Pointer { class: StorageClass::Logical, ty, mutability: None }).unwrap();
+                        TCType::unify_var_val(&mut d, *mt, &ty).unwrap();
                     }
-                    _ => todo!(),
+                    TCType::Struct(s) => {
+                        let s = match &symbols.get(s).1 {
+                            GlobalItem::Struct (s) => {
+                                s
+                            },
+                            _ => todo!()
+                        };
+                        let s = s.borrow();
+                        let findex = *s.field_names.get(mn).expect("Unable to find field in struct");
+                        TCType::unify_var_val(&mut d, *mt, &to_tctype(symbols, &s.fields[findex])).unwrap();
+                    }
+                    _ => todo!("not implemented for type: {:#?}", d.type_vars[st.0 as usize]),
                 }
                 return false;
             },
@@ -412,7 +444,7 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
                 return false;
             },
             TypeConstraint::PointerOf(p, v) => {
-                //println!("Solving PointerOf {} with type {}, IDs {}, and {}", p.0, v.0, d.reverse_type_table.get(p).cloned().unwrap_or(IRID(usize::MAX)).0, d.reverse_type_table.get(v).cloned().unwrap_or(IRID(usize::MAX)).0);
+                //println!("Solving PointerOf {:?} with type {:?}, IDs {}, and {}, tids {} and {}", &d.type_vars[p.0 as usize].canonicalize(&d.type_vars), &d.type_vars[v.0 as usize], d.reverse_type_table.get(p).cloned().unwrap_or(IRID(usize::MAX)).0, d.reverse_type_table.get(v).cloned().unwrap_or(IRID(usize::MAX)).0, p.0, v.0);
                 TCType::unify_var_val(&mut d, *p, &TCType::Pointer { class: StorageClass::Logical, ty: Box::new(TCType::TypeVariable(*v)), mutability: None }).unwrap();
                 return false;
             },
@@ -474,6 +506,8 @@ pub fn type_checking(symbols: &SymbolTable, strings: &StringTable, function: &Fu
     // }
     for (id, ty) in &d.tc_type_table {
         let t = &d.type_vars[ty.0 as usize];
+        //println!("Canon: IRID {} Type {:?}", id.0, ty);
+        //println!("{:#?}", d.type_vars.iter().enumerate().collect::<Vec<_>>());
         d.type_table.insert(*id, t.canonicalize(&d.type_vars).to_ir_type());
     }
     
@@ -484,6 +518,9 @@ fn lookup_type(symbols: &SymbolTable, ty: SymbolID) -> TCType {
     match &symbols.get(ty).1 {
         GlobalItem::Type(ty) => {
             to_tctype(symbols, &ty)
+        },
+        GlobalItem::Struct(_) => {
+            TCType::Struct(ty)
         }
         _ => {todo!()}
     }
@@ -514,7 +551,7 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 let s = symbols.get(*path);
                 match &s.1 {
                     rsl_data::internal::ir::GlobalItem::StructTemplate { args, constraints } => todo!(),
-                    rsl_data::internal::ir::GlobalItem::Struct { attrs, ident_token } => todo!(),
+                    rsl_data::internal::ir::GlobalItem::Struct(_) => todo!(),
                     rsl_data::internal::ir::GlobalItem::Trait { attrs, ident_token, args, constraints, types, functions } => todo!(),
                     rsl_data::internal::ir::GlobalItem::Static { attrs, ident_token, uni, ty } => {
                         //println!("{:#?}", to_tctype(symbols, ty));
@@ -600,11 +637,14 @@ fn type_check_block(data: &mut TCData, block: &IRBlock, symbols: &SymbolTable) {
                 data.constraints.push(TypeConstraint::PointerOf(data.tc_type_table[ptr], vty));
             },
             rsl_data::internal::ir::IRInstruction::Property { inp, name, out } => {
-                let ity = data.tc_type_table[inp];
-                let pt = data.new_free_type(TCType::VecOrStruct);
-                data.constraints.push(TypeConstraint::PointerOf(ity, pt));
-                let mty = data.new_ir_type(*out, TCType::Unknown);
-                data.constraints.push(TypeConstraint::MemberOf(pt, mty, name.0));
+                let input_type = data.tc_type_table[inp];
+                let pointee_type = data.new_free_type(TCType::VecOrStruct);
+                data.constraints.push(TypeConstraint::PointerOf(input_type, pointee_type));
+                let member_type = data.new_free_type( TCType::Unknown);
+                data.constraints.push(TypeConstraint::MemberOf(pointee_type, member_type, name.0));
+                let output_type = data.new_ir_type(*out, TCType::Pointer { class: StorageClass::Logical, ty: TCType::Unknown.into(), mutability: None });
+                data.constraints.push(TypeConstraint::PointerOf(output_type, member_type));
+                data.constraints.push(TypeConstraint::SamePointerMeta(input_type, output_type));
             },
             rsl_data::internal::ir::IRInstruction::Call { func, args, out, span } => {
                 let (sym, params, ret) = match &data.type_vars[data.tc_type_table[func].0 as usize] {

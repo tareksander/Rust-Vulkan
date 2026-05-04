@@ -1,7 +1,7 @@
 use std::{collections::HashMap, f32::consts::E, sync::LazyLock};
 
 use ariadne::{Color, Label, Report, ReportBuilder, ReportKind};
-use rsl_data::internal::{Attribute, CompilerData, InternedString, Mutability, ShaderType, SourceSpan, StorageClass, StringTable, Uniformity, Visibility, ast::{BinOp, Block, Expression, FunctionDefinition, GenericArg, ItemPath, ItemPathSegment, ModuleData, Statement, TokenRange, Type, UnOp}, tokens::{Keyword, Special, Token}};
+use rsl_data::internal::{Attribute, CompilerData, InternedString, Mutability, ShaderType, SourceSpan, StorageClass, StringTable, Uniformity, Visibility, ast::{BinOp, Block, Expression, FunctionDefinition, GenericArg, ItemPath, ItemPathSegment, ModuleData, Statement, StructDefinition, StructField, TokenRange, Type, UnOp}, tokens::{Keyword, Special, Token}};
 
 
 
@@ -95,6 +95,10 @@ impl<'a> ParserData<'a> {
         }
     }
     
+    fn point_range(&self) -> TokenRange {
+        TokenRange::point(self.file, self.index)
+    }
+    
 }
 
 
@@ -156,7 +160,14 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                         data.take();
                     },
                     Keyword::Struct => {
-                        todo!()
+                        match parse_struct(data, visibility, &attrs) {
+                            Ok(s) => {
+                                m.structs.push(s);
+                            },
+                            Err(_) => {}
+                        }
+                        visibility = None;
+                        attrs.clear();
                     },
                     Keyword::Unsafe => {
                         todo!()
@@ -170,6 +181,7 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
                         }
                         visibility = None;
                         attrs.clear();
+                        shader_type = None;
                     },
                     _=> {
                         break;
@@ -314,7 +326,44 @@ fn parse_module(data: &mut ParserData, attrs: &mut Vec<Attribute>, toplevel: boo
 
 
 
-
+fn parse_struct(data: &mut ParserData, vis: Option<(Visibility, TokenRange)>, attrs: &Vec<Attribute>) -> ParserResult<StructDefinition> {
+    let struct_token = data.point_range();
+    data.take();
+    let ident = data.take_ident()?;
+    let generics = vec![];
+    let generics_constraints = vec![];
+    assert!(data.take() == &Token::Special(Special::CurlyBracketOpen));
+    let fields = parse_delimited(data, |d| {
+        let v = match d.peek() {
+            Token::Keyword(Keyword::Pub) => {
+                let r = d.point_range();
+                d.take();
+                Some((Visibility::Pub, r))
+            },
+            _ => None,
+        };
+        let it = parse_ident_type(d)?;
+        return Ok(StructField {
+            attrs: vec![],
+            visibility: v,
+            ident: it.0,
+            ident_token: it.1,
+            ty: it.2,
+        });
+    }, Token::Special(Special::Comma), Token::Special(Special::CurlyBracketClose))?;
+    assert!(data.take() == &Token::Special(Special::CurlyBracketClose));
+    
+    return Ok(StructDefinition {
+        attrs: attrs.clone(),
+        visibility: vis,
+        struct_token,
+        ident: ident.0,
+        ident_token: ident.1,
+        generics,
+        generics_constraints,
+        fields,
+    });
+}
 
 
 

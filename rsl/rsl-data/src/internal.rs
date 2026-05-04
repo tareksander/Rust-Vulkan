@@ -1,5 +1,7 @@
 //! This module contains compiler internals which should not be used by end-users, but have to be public to be usable from the other compiler crates
 
+#[cfg(debug_assertions)]
+use std::rc::Rc;
 use std::{cell::RefCell, collections::HashMap, fmt::{Debug, Display}, hash::{BuildHasher, Hash, Hasher, RandomState}, ops::{Add, Range}, path::PathBuf};
 
 use ast::ModuleData;
@@ -28,7 +30,11 @@ struct StringTableInner {
     hasher: RandomState,
 }
 
+#[cfg(not(debug_assertions))]
 pub struct StringTable(RefCell<StringTableInner>);
+
+#[cfg(debug_assertions)]
+pub struct StringTable(Rc<RefCell<StringTableInner>>);
 
 impl Debug for StringTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,9 +42,23 @@ impl Debug for StringTable {
     }
 }
 
+#[cfg(debug_assertions)]
+thread_local! {
+    static STRING_TABLES: RefCell<Vec<StringTable>> = vec![].into();
+}
+
+
 impl StringTable {
     pub fn new() -> Self {
-        Self(RefCell::new(StringTableInner { map: HashTable::with_capacity(1024), strings: Vec::with_capacity(1024), hasher: RandomState::new() }))
+        #[cfg(debug_assertions)]
+        let s = Self(Rc::new(RefCell::new(StringTableInner { map: HashTable::with_capacity(1024), strings: Vec::with_capacity(1024), hasher: RandomState::new() })));
+        #[cfg(not(debug_assertions))]
+        let s = Self(RefCell::new(StringTableInner { map: HashTable::with_capacity(1024), strings: Vec::with_capacity(1024), hasher: RandomState::new() }));
+        #[cfg(debug_assertions)]
+        {
+            STRING_TABLES.with(|v| v.borrow_mut().push(StringTable(s.0.clone())));
+        }
+        s
     }
     
     pub fn lookup(&self, s: InternedString) -> String {
@@ -75,8 +95,34 @@ impl StringTable {
 }
 
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InternedString(usize);
+
+impl Debug for InternedString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[cfg(not(debug_assertions))]
+        f.debug_tuple("InternedString").field(&self.0).finish()?;
+        #[cfg(debug_assertions)]
+        f.debug_tuple("InternedString").field(&STRING_TABLES.with_borrow(|v| {
+            let mut s = String::new();
+            for t in v {
+                if let Some(f) = t.0.borrow().strings.get(self.0) {
+                    if s.is_empty() {
+                        s = format!("'{}'", f);
+                    } else {
+                        s = format!("{} or '{}'", s, f);
+                    }
+                }
+            }
+            if s.is_empty() {
+                self.0.to_string()
+            } else {
+                s
+            }
+        })).finish()?;
+        Ok(())
+    }
+}
 
 
 impl InternedString {
@@ -109,6 +155,23 @@ pub enum StorageClass {
 }
 
 impl StorageClass {
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            StorageClass::Input => "input",
+            StorageClass::Output => "output",
+            StorageClass::Function => "function",
+            StorageClass::Private => "private",
+            StorageClass::Push => "push",
+            StorageClass::Storage => "storage",
+            StorageClass::PhysicalStorage => "physicalstorage",
+            StorageClass::Workgroup => "workgroup",
+            StorageClass::Uniform => "uniform",
+            StorageClass::UniformConstant => "uniformconstant",
+            StorageClass::Logical => "logical",
+        }
+    }
+    
+    
     pub fn explicit_layout(&self) -> bool {
         match self {
             StorageClass::Input => false,
